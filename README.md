@@ -72,3 +72,7 @@ pytest
 The tests feed canary strings through the converter (raw, base64,
 URL-encoded, hex and JSON-escaped) and fail if any of them shows up in the
 output. They also run every command with sockets disabled.
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).
