@@ -5,7 +5,8 @@
 
 The manifest's ``dataset_id`` is random per ``prepare`` and never reused,
 so it can't link datasets. Neither file holds the key, file paths or
-anything the lint would reject.
+anything the lint would reject. ``kept_names`` lists every name written in
+clear text because of ``--keep-names``; the lint accepts no others.
 """
 from __future__ import annotations
 
@@ -18,16 +19,30 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from . import __version__, policy
+from .chat import convert_chat_trajectories, is_chat_trajectory
 from .claude_code import convert_claude_code_transcript, is_claude_code_transcript
+from .codex import convert_codex_session, is_codex_session
 from .contract import CONTRACT_VERSION, TraceEvent
+from .events import convert_event_log, is_event_log
 from .lint import check_event
-from .pseudonym import Pseudonymizer
+from .names import KEEPABLE, Names
+from .otel import convert_otel_export, is_otel_export
 
 MAX_LINE_BYTES = 16 * 1024 * 1024
 MAX_FILE_BYTES = 1024 * 1024 * 1024
 
 EVENTS = "events.jsonl"
 MANIFEST = "manifest.json"
+
+
+# Checked in order: the generic event log last, since it accepts the most.
+FORMATS = (
+    ("claude-code", is_claude_code_transcript, convert_claude_code_transcript),
+    ("codex", is_codex_session, convert_codex_session),
+    ("otel", is_otel_export, convert_otel_export),
+    ("openai-chat", lambda rows: bool(rows) and all(is_chat_trajectory(r) for r in rows), convert_chat_trajectories),
+    ("events", is_event_log, convert_event_log),
+)
 
 
 class PrepareError(Exception):
@@ -38,8 +53,9 @@ class PrepareError(Exception):
         self.code = code
 
 
-def read_jsonl(path: Path) -> list[dict]:
-    """Parse one transcript, line by line with a per-line cap. Symlinks and
+def read_records(path: Path) -> list:
+    """Parse one trace file as JSON Lines, line by line with a per-line cap,
+    or else as one JSON document (a list is its records). Symlinks and
     directories are refused: the user names every file that is read."""
     if path.is_symlink():
         raise PrepareError("INPUT_SYMLINK", f"{path} is a symlink; pass the file it points to")
@@ -51,19 +67,28 @@ def read_jsonl(path: Path) -> list[dict]:
     with path.open("rb") as f:
         for number, line in enumerate(iter(lambda: f.readline(MAX_LINE_BYTES + 1), b""), start=1):
             if len(line) > MAX_LINE_BYTES:
-                raise PrepareError("LINE_TOO_LARGE", f"{path} line {number} is longer than {MAX_LINE_BYTES} bytes")
+                return _read_document(path, f"line {number} is longer than {MAX_LINE_BYTES} bytes")
             if not line.strip():
                 continue
             try:
                 rows.append(json.loads(line))
             except (json.JSONDecodeError, UnicodeDecodeError):
-                raise PrepareError("INPUT_NOT_JSONL", f"{path} line {number} is not JSON") from None
+                return _read_document(path, f"line {number} is not JSON")
     return rows
 
 
-def _check(events: list[dict]) -> None:
+def _read_document(path: Path, jsonl_problem: str) -> list:
+    try:
+        document = json.loads(path.read_bytes())
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise PrepareError("INPUT_NOT_JSON", f"{path} is neither JSON Lines ({jsonl_problem}) nor one JSON document"
+                           ) from None
+    return document if isinstance(document, list) else [document]
+
+
+def _check(events: list[dict], kept: frozenset[str]) -> None:
     for number, event in enumerate(events, start=1):
-        problems = check_event(event)
+        problems = check_event(event, kept)
         if problems:
             raise PrepareError("PRIVACY_LINT", f"event {number} has fields that may carry clear text: "
                                                + ", ".join(sorted(set(problems))))
@@ -74,20 +99,32 @@ def _check(events: list[dict]) -> None:
             raise PrepareError("CONTRACT_INVALID", f"event {number} breaks contract v1 in: {', '.join(fields)}") from None
 
 
-def prepare(paths: list[Path], out_dir: Path, ps: Pseudonymizer) -> dict:
+def detect(rows: list) -> str | None:
+    return next((name for name, matches, _ in FORMATS if matches(rows)), None)
+
+
+def prepare(paths: list[Path], out_dir: Path, names: Names) -> dict:
     if out_dir.exists() and any(out_dir.iterdir()):
         raise PrepareError("OUTPUT_NOT_EMPTY", f"{out_dir} already has files; pick an empty or new directory")
     events: list[dict] = []
     sessions = sessions_without_cost = 0
+    formats: set[str] = set()
+    converters = {name: convert for name, _, convert in FORMATS}
     for path in paths:
-        rows = read_jsonl(path)
-        if not is_claude_code_transcript(rows):
-            raise PrepareError("FORMAT_UNSUPPORTED", f"{path} is not a Claude Code transcript")
-        conversion = convert_claude_code_transcript(rows, ps)
+        rows = read_records(path)
+        source = detect(rows)
+        if source is None:
+            raise PrepareError("FORMAT_UNSUPPORTED", f"{path} is not a supported trace format: "
+                                                     + ", ".join(name for name, _, _ in FORMATS))
+        conversion = converters[source](rows, names)
+        if not conversion.events:
+            raise PrepareError("NO_EVENTS", f"{path} ({source}) has no LLM or tool calls to prepare")
+        formats.add(source)
         events.extend(conversion.events)
         sessions += conversion.sessions
         sessions_without_cost += conversion.sessions_without_cost
-    _check(events)
+    kept = frozenset(names.kept)
+    _check(events, kept)
 
     payload = "".join(json.dumps(e, ensure_ascii=False, sort_keys=True) + "\n" for e in events).encode()
     manifest = {
@@ -95,11 +132,12 @@ def prepare(paths: list[Path], out_dir: Path, ps: Pseudonymizer) -> dict:
         "client_version": __version__,
         "contract_version": CONTRACT_VERSION,
         "policy_version": policy.POLICY_VERSION,
-        "source_format": "claude-code",
+        "source_format": "+".join(sorted(formats)),
         "files": len(paths),
         "sessions": sessions,
         "sessions_without_cost": sessions_without_cost,
         "events": len(events),
+        "kept_names": sorted(kept),
         "payload_sha256": hashlib.sha256(payload).hexdigest(),
     }
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -121,7 +159,10 @@ def validate(out_dir: Path) -> tuple[dict, list[dict]]:
     events = [json.loads(line) for line in payload.decode().splitlines() if line.strip()]
     if len(events) != manifest.get("events"):
         raise PrepareError("PAYLOAD_CHANGED", "the event count doesn't match the manifest")
-    _check(events)
+    kept = manifest.get("kept_names", [])
+    if not isinstance(kept, list) or not all(isinstance(k, str) and KEEPABLE.fullmatch(k) for k in kept):
+        raise PrepareError("MANIFEST_INVALID", "kept_names must be a list of single-word names")
+    _check(events, frozenset(kept))
     return manifest, events
 
 

@@ -28,10 +28,9 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import PurePosixPath
-from typing import Any
 
 from . import policy
-from .pseudonym import Pseudonymizer
+from .names import Names, version
 
 # Relative per-token price weights (input = 1), used only to split the
 # session's recorded cost across calls.
@@ -70,15 +69,21 @@ def is_claude_code_transcript(rows: list) -> bool:
     )
 
 
-class _Namer:
-    """Turns raw tool calls into node names made only of policy words and
-    pseudonyms."""
+class Namer:
+    """Turns raw tool calls into node names made only of policy words,
+    pseudonyms and (with ``--keep-names``) the user's tool names."""
 
-    def __init__(self, ps: Pseudonymizer) -> None:
-        self.ps = ps
+    def __init__(self, names: Names) -> None:
+        self.names = names
 
     def name(self, value: str) -> str:
-        return self.ps.token("name", value)
+        return self.names.token("name", value)
+
+    def tool(self, name: str, builtin: frozenset[str] = policy.BUILTIN_TOOLS) -> str:
+        """A tool's own name: built-ins in clear text, MCP and custom tools are theirs."""
+        if name in builtin:
+            return name
+        return f"mcp {self.names.step(name)}" if name.startswith("mcp__") else self.names.step(name)
 
     def bash_operation(self, command: str) -> str:
         segments = [seg.strip() for seg in command.replace("\n", "&&").replace(";", "&&").split("&&")]
@@ -114,13 +119,11 @@ class _Namer:
             return self.name(program)
         return "other"
 
-    def tool_operation(self, name: str, tool_input: dict) -> str:
+    def tool_operation(self, name: str, tool_input: dict, builtin: frozenset[str] = policy.BUILTIN_TOOLS) -> str:
         command = tool_input.get("command")
         if name == "Bash" and isinstance(command, str):
             return f"Bash: {self.bash_operation(command)}"
-        # MCP and custom tool names are theirs, so pseudonyms
-        tool = name if name in policy.BUILTIN_TOOLS else (
-            f"mcp {self.name(name)}" if name.startswith("mcp__") else self.name(name))
+        tool = self.tool(name, builtin)
         for arg in _OPERATION_ARGS:
             value = tool_input.get(arg)
             if isinstance(value, str) and 0 < len(value) <= 40 and "\n" not in value:
@@ -133,7 +136,13 @@ class _Namer:
         return tool
 
 
-def _ts_ms(record: dict) -> float | None:
+def llm_node(trigger: str) -> str:
+    """An LLM call is named by the first thing it reacted to."""
+    first = trigger.split(" + ")[0].removesuffix(" (error)")
+    return f"llm_call ← {first.split(': ')[0]}"
+
+
+def ts_ms(record: dict) -> float | None:
     ts = record.get("timestamp")
     if not isinstance(ts, str) or not ts:
         return None
@@ -177,20 +186,10 @@ def _user_trigger(record: dict, tool_nodes_by_id: dict[str, str]) -> str:
     return "user_prompt"
 
 
-def _model(ps: Pseudonymizer, model: str | None) -> str | None:
-    if model is None or (model.startswith(policy.MODEL_PREFIX) and model.replace("-", "").replace(".", "").isalnum()):
-        return model
-    return ps.token("model", model)
-
-
-def _version(value: Any) -> str | None:
-    parts = value.split(".") if isinstance(value, str) else []
-    return value if len(parts) == 3 and all(p.isdigit() for p in parts) else None
-
-
-def convert_claude_code_transcript(rows: list[dict], ps: Pseudonymizer) -> Conversion:
+def convert_claude_code_transcript(rows: list[dict], names: Names) -> Conversion:
     rows = [r for r in rows if isinstance(r, dict)]
-    namer = _Namer(ps)
+    namer = Namer(names)
+    ps = names
     session_cost_by_model: dict[str, dict[str, float]] = defaultdict(dict)
     for r in rows:
         if r.get("type") == "cost-state":
@@ -214,7 +213,7 @@ def convert_claude_code_transcript(rows: list[dict], ps: Pseudonymizer) -> Conve
     for r in rows:
         kind = r.get("type")
         session = r.get("sessionId")
-        record_ms = _ts_ms(r)
+        record_ms = ts_ms(r)
         previous_ms = None
         if session and record_ms is not None:
             seen_lane = f"{session}:{bool(r.get('isSidechain'))}"
@@ -254,20 +253,19 @@ def convert_claude_code_transcript(rows: list[dict], ps: Pseudonymizer) -> Conve
         common = {
             "trace_id": ps.token("id", session),
             "run_id": ps.token("id", current_prompt.get(session, session)),
-            "workflow": f"claude-code/{ps.token('id', PurePosixPath(cwd).name or 'unknown')}",
+            "workflow": f"claude-code/{names.step(PurePosixPath(cwd).name or 'unknown', domain='id')}",
             "agent": "claude-code-subagent" if sidechain else "claude-code",
-            "workflow_version": _version(r.get("version")),
+            "workflow_version": version(r.get("version")),
         }
 
         call = llm_calls.get(message_id)
         if call is None:
             trigger = last_trigger.get(lane, "user_prompt")
-            first = trigger.split(" + ")[0].removesuffix(" (error)")
             call = {
                 **common,
                 "event_type": "decision",
-                "node": f"llm_call ← {first.split(': ')[0]}",
-                "model": _model(ps, raw_model),
+                "node": llm_node(trigger),
+                "model": names.model(raw_model),
                 "input_state": {"trigger": trigger},
                 "input_complete": False,
                 "trigger": trigger,
@@ -302,7 +300,7 @@ def convert_claude_code_transcript(rows: list[dict], ps: Pseudonymizer) -> Conve
                 "parent": ps.token("id", message_id),
                 # a tool call starts from whatever the LLM call that chose it reacted to
                 "trigger": call["trigger"],
-                "tool": {"name": name if name in policy.BUILTIN_TOOLS else namer.name(name)},
+                "tool": {"name": name if name in policy.BUILTIN_TOOLS else names.step(name)},
                 # one pseudonym for the whole input: equal inputs stay equal,
                 # and argument names of custom tools don't leak either
                 "input_state": {"input": ps.token("input", kept)},

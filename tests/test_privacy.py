@@ -9,16 +9,17 @@ from profiler_client import cli
 from profiler_client.claude_code import convert_claude_code_transcript
 from profiler_client.dataset import EVENTS, PrepareError, prepare, validate
 from profiler_client.lint import check_event
+from profiler_client.names import Names
 from profiler_client.pseudonym import Pseudonymizer, load_or_create_key, new_key
 
 
 def _events(rows, key=b"k" * 32):
-    return convert_claude_code_transcript(rows, Pseudonymizer(key)).events
+    return convert_claude_code_transcript(rows, Names(Pseudonymizer(key))).events
 
 
 def test_no_canary_reaches_the_dataset_in_any_form(tmp_path, transcript_file):
     out = tmp_path / "ready"
-    prepare([transcript_file], out, Pseudonymizer(new_key()))
+    prepare([transcript_file], out, Names(Pseudonymizer(new_key())))
     written = (out / EVENTS).read_text() + (out / "manifest.json").read_text()
     for canary in CANARIES:
         for form in canary_forms(canary):
@@ -67,7 +68,7 @@ def test_lint_names_the_field_not_the_value():
 
 def test_validate_catches_an_edited_payload(tmp_path, transcript_file):
     out = tmp_path / "ready"
-    prepare([transcript_file], out, Pseudonymizer(new_key()))
+    prepare([transcript_file], out, Names(Pseudonymizer(new_key())))
     validate(out)
     with (out / EVENTS).open("a") as f:
         f.write(json.dumps({"node": "x"}) + "\n")
@@ -79,11 +80,11 @@ def test_symlinks_and_other_formats_are_refused(tmp_path, transcript_file):
     link = tmp_path / "link.jsonl"
     link.symlink_to(transcript_file)
     with pytest.raises(PrepareError, match="INPUT_SYMLINK"):
-        prepare([link], tmp_path / "a", Pseudonymizer(new_key()))
+        prepare([link], tmp_path / "a", Names(Pseudonymizer(new_key())))
     other = tmp_path / "other.jsonl"
     other.write_text('{"trace_id": "t"}\n')
     with pytest.raises(PrepareError, match="FORMAT_UNSUPPORTED"):
-        prepare([other], tmp_path / "b", Pseudonymizer(new_key()))
+        prepare([other], tmp_path / "b", Names(Pseudonymizer(new_key())))
 
 
 def test_errors_never_quote_file_content(tmp_path, capsys):
