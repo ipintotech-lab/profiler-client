@@ -97,6 +97,24 @@ The tests feed canary strings through every converter (raw, base64,
 URL-encoded, hex and JSON-escaped) and fail if any of them shows up in the
 output. They also run every command with sockets disabled.
 
+## Terms
+
+- **The software.** The client is open source under Apache-2.0. You may use,
+  change and share it under that license. It is provided as is, without
+  warranties, and its authors are not liable for what happens when you use
+  it (sections 7 and 8 of the license).
+- **Your traces.** Run it only on traces you are allowed to use. If they
+  belong to your employer or your customers, get their permission first.
+- **Your dataset.** The client runs on your machine and sends nothing. The
+  dataset it writes is yours, and you decide whether to send it anywhere.
+- **Not anonymous.** The dataset is pseudonymized, not anonymous: counts and
+  timings can still say something about your work. Read it with `inspect`
+  before you share it.
+- **Sending it to the beta.** Uploading a dataset to the hosted AI Agent
+  Profiler beta is covered by the
+  [beta terms and privacy notice](https://agentsprofiler-production.up.railway.app/#terms),
+  which you accept before your first upload.
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
