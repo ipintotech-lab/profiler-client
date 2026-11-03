@@ -99,6 +99,10 @@ output. They also run every command with sockets disabled.
 
 ## Terms
 
+The full terms and privacy notes are at
+[agentsprofiler-production.up.railway.app/client-terms](https://agentsprofiler-production.up.railway.app/client-terms).
+In short:
+
 - **The software.** The client is open source under Apache-2.0. You may use,
   change and share it under that license. It is provided as is, without
   warranties, and its authors are not liable for what happens when you use
