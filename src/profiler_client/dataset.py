@@ -1,7 +1,15 @@
 """Read trace files and write / check an ``analysis-ready`` directory:
 
-* ``events.jsonl`` -- contract v1 events, one per line
+* ``events.jsonl`` -- a seal line, then contract v1 events, one per line
 * ``manifest.json`` -- versions, counts and the SHA-256 of ``events.jsonl``
+
+The seal (``{"profiler_client_seal": {...}}``) records the client, contract
+and policy versions, the event count, the kept names and the SHA-256 of
+the event lines after it, so ``events.jsonl`` can be checked on its own:
+the profiler server reads only that file, refuses it without a seal that
+matches, and runs ``read_sealed`` -- this same lint -- on every event. The
+seal is a checksum, not a signature: anyone can compute one, which is why
+the server re-runs the lint instead of trusting it.
 
 The manifest's ``dataset_id`` is random per ``prepare`` and never reused,
 so it can't link datasets. Neither file holds the key, file paths or
@@ -33,6 +41,7 @@ MAX_FILE_BYTES = 1024 * 1024 * 1024
 
 EVENTS = "events.jsonl"
 MANIFEST = "manifest.json"
+SEAL = "profiler_client_seal"
 
 
 # Checked in order: the generic event log last, since it accepts the most.
@@ -86,8 +95,10 @@ def _read_document(path: Path, jsonl_problem: str) -> list:
     return document if isinstance(document, list) else [document]
 
 
-def _check(events: list[dict], kept: frozenset[str]) -> None:
+def _check(events: list, kept: frozenset[str]) -> None:
     for number, event in enumerate(events, start=1):
+        if not isinstance(event, dict):
+            raise PrepareError("CONTRACT_INVALID", f"event {number} is not a JSON object")
         problems = check_event(event, kept)
         if problems:
             raise PrepareError("PRIVACY_LINT", f"event {number} has fields that may carry clear text: "
@@ -126,7 +137,7 @@ def prepare(paths: list[Path], out_dir: Path, names: Names) -> dict:
     kept = frozenset(names.kept)
     _check(events, kept)
 
-    payload = "".join(json.dumps(e, ensure_ascii=False, sort_keys=True) + "\n" for e in events).encode()
+    payload = sealed_payload(events, kept)
     manifest = {
         "dataset_id": secrets.token_hex(16),
         "client_version": __version__,
@@ -146,9 +157,55 @@ def prepare(paths: list[Path], out_dir: Path, names: Names) -> dict:
     return manifest
 
 
+def sealed_payload(events: list[dict], kept: frozenset[str]) -> bytes:
+    """``events.jsonl``'s bytes: the seal line, then one event per line."""
+    body = "".join(json.dumps(e, ensure_ascii=False, sort_keys=True) + "\n" for e in events).encode()
+    seal = {
+        "client_version": __version__,
+        "contract_version": CONTRACT_VERSION,
+        "policy_version": policy.POLICY_VERSION,
+        "events": len(events),
+        "kept_names": sorted(kept),
+        "payload_sha256": hashlib.sha256(body).hexdigest(),
+    }
+    return json.dumps({SEAL: seal}, sort_keys=True).encode() + b"\n" + body
+
+
+def read_sealed(payload: bytes) -> tuple[dict, list[dict]]:
+    """Check ``events.jsonl``'s bytes on their own: a seal first, the
+    events after it match its hash and count, and every event passes the
+    lint (with the seal's kept names) and the contract."""
+    first, _, body = payload.partition(b"\n")
+    try:
+        record = json.loads(first)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        record = None
+    seal = record.get(SEAL) if isinstance(record, dict) and set(record) == {SEAL} else None
+    if not isinstance(seal, dict):
+        raise PrepareError("SEAL_MISSING", f"{EVENTS} doesn't start with a profiler-client seal; "
+                                           "prepare it with profiler-client")
+    if seal.get("contract_version") != CONTRACT_VERSION:
+        raise PrepareError("SEAL_UNSUPPORTED", f"the dataset isn't contract v{CONTRACT_VERSION}; prepare it "
+                                               "with a matching profiler-client")
+    if hashlib.sha256(body).hexdigest() != seal.get("payload_sha256"):
+        raise PrepareError("PAYLOAD_CHANGED", "the events no longer match the seal; run prepare again")
+    try:
+        events = [json.loads(line) for line in body.decode().splitlines() if line.strip()]
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise PrepareError("PAYLOAD_CHANGED", "an event line is not JSON") from None
+    if len(events) != seal.get("events"):
+        raise PrepareError("PAYLOAD_CHANGED", "the event count doesn't match the seal")
+    kept = seal.get("kept_names")
+    if not isinstance(kept, list) or not all(isinstance(k, str) and KEEPABLE.fullmatch(k) for k in kept):
+        raise PrepareError("SEAL_INVALID", "kept_names must be a list of single-word names")
+    _check(events, frozenset(kept))
+    return seal, events
+
+
 def validate(out_dir: Path) -> tuple[dict, list[dict]]:
     """Re-check a prepared directory: the payload still matches the
-    manifest's hash, and every event passes the lint and the contract."""
+    manifest's hash, the manifest agrees with the seal, and every event
+    passes the lint and the contract."""
     try:
         manifest = json.loads((out_dir / MANIFEST).read_text(encoding="utf-8"))
         payload = (out_dir / EVENTS).read_bytes()
@@ -156,13 +213,9 @@ def validate(out_dir: Path) -> tuple[dict, list[dict]]:
         raise PrepareError("DATASET_UNREADABLE", f"{out_dir}: {type(exc).__name__}") from None
     if hashlib.sha256(payload).hexdigest() != manifest.get("payload_sha256"):
         raise PrepareError("PAYLOAD_CHANGED", f"{EVENTS} no longer matches the manifest; run prepare again")
-    events = [json.loads(line) for line in payload.decode().splitlines() if line.strip()]
-    if len(events) != manifest.get("events"):
-        raise PrepareError("PAYLOAD_CHANGED", "the event count doesn't match the manifest")
-    kept = manifest.get("kept_names", [])
-    if not isinstance(kept, list) or not all(isinstance(k, str) and KEEPABLE.fullmatch(k) for k in kept):
-        raise PrepareError("MANIFEST_INVALID", "kept_names must be a list of single-word names")
-    _check(events, frozenset(kept))
+    seal, events = read_sealed(payload)
+    if manifest.get("events") != seal["events"] or manifest.get("kept_names") != seal["kept_names"]:
+        raise PrepareError("MANIFEST_INVALID", "the manifest's events or kept_names don't match the seal")
     return manifest, events
 
 
