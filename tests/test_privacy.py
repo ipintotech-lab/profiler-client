@@ -7,7 +7,7 @@ from conftest import CANARIES, canary_forms
 
 from profiler_client import cli
 from profiler_client.claude_code import convert_claude_code_transcript
-from profiler_client.dataset import EVENTS, PrepareError, prepare, validate
+from profiler_client.dataset import EVENTS, PrepareError, prepare, read_sealed, sealed_payload, validate
 from profiler_client.lint import check_event
 from profiler_client.names import Names
 from profiler_client.pseudonym import Pseudonymizer, load_or_create_key, new_key
@@ -74,6 +74,34 @@ def test_validate_catches_an_edited_payload(tmp_path, transcript_file):
         f.write(json.dumps({"node": "x"}) + "\n")
     with pytest.raises(PrepareError, match="PAYLOAD_CHANGED"):
         validate(out)
+
+
+def test_events_jsonl_carries_a_seal_that_checks_it_on_its_own(tmp_path, transcript_file):
+    out = tmp_path / "ready"
+    manifest = prepare([transcript_file], out, Names(Pseudonymizer(new_key())))
+    payload = (out / EVENTS).read_bytes()
+    seal, events = read_sealed(payload)
+    assert seal["events"] == manifest["events"] == len(events)
+    assert seal["contract_version"] == manifest["contract_version"]
+    assert seal["policy_version"] == manifest["policy_version"]
+    seal_line, body = payload.split(b"\n", 1)
+    # no seal, an edited event, a dropped event: each is refused
+    for broken, code in [
+        (body, "SEAL_MISSING"),
+        (seal_line + b"\n" + body.replace(b'"Bash"', b'"Bosh"', 1), "PAYLOAD_CHANGED"),
+        (seal_line + b"\n" + body.split(b"\n", 1)[1], "PAYLOAD_CHANGED"),
+        (b'{"profiler_client_seal": {}, "x": 1}\n' + body, "SEAL_MISSING"),
+    ]:
+        with pytest.raises(PrepareError, match=code):
+            read_sealed(broken)
+
+
+def test_a_resealed_dataset_still_has_to_pass_the_lint():
+    # the seal is a checksum anyone can compute: the lint is what holds
+    leaked = {"event_type": "tool_call", "agent": "main", "node": "customer list for Acme Corp"}
+    with pytest.raises(PrepareError, match="PRIVACY_LINT") as exc:
+        read_sealed(sealed_payload([leaked], frozenset()))
+    assert "Acme" not in str(exc.value)
 
 
 def test_symlinks_and_other_formats_are_refused(tmp_path, transcript_file):

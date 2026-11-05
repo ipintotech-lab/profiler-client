@@ -6,7 +6,7 @@ import pytest
 from conftest import CANARIES, canary_forms
 
 from profiler_client import cli
-from profiler_client.dataset import EVENTS, MANIFEST, PrepareError, prepare, validate
+from profiler_client.dataset import EVENTS, MANIFEST, PrepareError, prepare, read_sealed, validate
 from profiler_client.lint import check_event
 from profiler_client.names import Names
 from profiler_client.pseudonym import Pseudonymizer, new_key
@@ -154,7 +154,7 @@ FORMATS = {
 def _prepare(tmp_path, source, keep=False):
     out = tmp_path / "ready"
     manifest = prepare([FORMATS[source](tmp_path)], out, Names(Pseudonymizer(new_key()), keep=keep))
-    events = [json.loads(line) for line in (out / EVENTS).read_text().splitlines()]
+    events = [json.loads(line) for line in (out / EVENTS).read_text().splitlines()[1:]]  # after the seal
     return out, manifest, events
 
 
@@ -242,13 +242,19 @@ def test_keep_names_keeps_single_word_names_only_and_lists_them(tmp_path):
     for canary in ("ACME_TOKEN_9f8e7d", "customer list for Acme Corp", "make deploy-acme", "acme-finetune-v3"):
         assert canary not in written
     validate(out)
-    # a kept name the manifest doesn't list fails the lint
+    # the manifest must agree with the seal
     manifest_file = out / MANIFEST
     edited = json.loads(manifest_file.read_text())
     edited["kept_names"] = ["acme-agent"]
     manifest_file.write_text(json.dumps(edited))
-    with pytest.raises(PrepareError, match="PRIVACY_LINT"):
+    with pytest.raises(PrepareError, match="MANIFEST_INVALID"):
         validate(out)
+    # a kept name the seal doesn't list fails the lint, even with a recomputed hash
+    lines = (out / EVENTS).read_bytes().split(b"\n", 1)
+    seal = json.loads(lines[0])
+    seal["profiler_client_seal"]["kept_names"] = ["acme-agent"]
+    with pytest.raises(PrepareError, match="PRIVACY_LINT"):
+        read_sealed(json.dumps(seal).encode() + b"\n" + lines[1])
 
 
 def test_keep_names_never_keeps_contents_in_codex(tmp_path):

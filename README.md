@@ -29,7 +29,8 @@ profiler-client version
 
 `prepare` reads only the files you name: directories and symlinks are
 refused, and it prints the list before reading. It writes `events.jsonl` and
-`manifest.json` into a new or empty directory.
+`manifest.json` into a new or empty directory. `events.jsonl` is the file you
+upload: the profiler accepts only a file prepared by this client.
 
 ## Supported traces
 
@@ -81,6 +82,12 @@ string must be a pseudonym, built from policy words or a kept name listed in
 the manifest, otherwise nothing is written and the error names the field, never the value. `validate` runs it
 again, and also checks that `events.jsonl` still matches the hash in the
 manifest.
+
+The first line of `events.jsonl` is a seal: the client, contract and policy
+versions, the event count, the kept names and the SHA-256 of the events after
+it. The profiler server refuses a file without a matching seal, then runs this
+same privacy lint and contract check on every event. The seal is a checksum,
+not a signature, so the server's own lint is what decides.
 
 **This is pseudonymization, not anonymity.** How often things happen, the
 order of steps and timings stay visible, and they can say something about how
