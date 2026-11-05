@@ -24,8 +24,13 @@ profiler-client prepare ~/.codex/sessions/2026/10/18/rollout-*.jsonl -o analysis
 profiler-client prepare spans.json --keep-names -o analysis-ready
 profiler-client inspect analysis-ready
 profiler-client validate analysis-ready
+profiler-client open report.json
 profiler-client version
 ```
+
+`prepare` saves pseudonym-to-name mappings in a private local directory. Use
+`--no-name-list` to skip that. After downloading a report JSON, `open` writes
+a local HTML copy with matching names restored; no report data is sent anywhere.
 
 `prepare` reads only the files you name: directories and symlinks are
 refused, and it prints the list before reading. It writes `events.jsonl` and
