@@ -197,6 +197,35 @@ def test_open_restores_names_from_matching_payload_hash(tmp_path, monkeypatch):
     assert "calculate-total" in rendered
     assert workflow_token not in rendered
     assert node_token not in rendered
+    # the decoded page holds real values, so it is owner-only
+    assert (output.stat().st_mode & 0o777) == 0o600
+
+
+def test_open_refuses_an_oversized_or_too_deeply_nested_report(tmp_path):
+    big = tmp_path / "big.json"
+    big.write_bytes(b'{"x":"' + b"a" * (64 * 1024 * 1024 + 1) + b'"}')
+    assert cli.main(["open", str(big), "-o", str(tmp_path / "big.html")]) == 1
+
+    deep = tmp_path / "deep.json"
+    deep.write_bytes(b"[" * 200000 + b"]" * 200000)
+    assert cli.main(["open", str(deep), "-o", str(tmp_path / "deep.html")]) == 1
+
+
+def test_forget_removes_only_the_named_datasets_list(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    names_dir = tmp_path / "profiler-client" / "names"
+    keep, drop = "a" * 64, "b" * 64
+    write_name_list(keep, {"h:" + "1" * 64: "keep-me"}, names_dir)
+    write_name_list(drop, {"h:" + "2" * 64: "drop-me"}, names_dir)
+    # forget by a report JSON that names the dataset
+    report = tmp_path / "r.json"
+    report.write_text(json.dumps({"payload_sha256": drop}))
+    assert cli.main(["forget", str(report)]) == 0
+    assert not (names_dir / f"{drop}.json").exists()
+    assert (names_dir / f"{keep}.json").exists()
+    # --all clears the rest
+    assert cli.main(["forget", "--all"]) == 0
+    assert list(names_dir.glob("*.json")) == []
 
 
 def test_open_without_a_hash_never_borrows_another_datasets_names(tmp_path, monkeypatch):

@@ -68,6 +68,25 @@ def read_name_lists(directory: Path | None = None, payload_sha256: str | None = 
     return names
 
 
+def forget_name_lists(directory: Path | None = None, payload_sha256: str | None = None,
+                      *, everything: bool = False) -> int:
+    """Delete name lists on this machine and return how many were removed:
+    all of them with ``everything``, or the one for ``payload_sha256``."""
+    directory = directory or name_list_dir()
+    if not directory.is_dir():
+        return 0
+    if everything:
+        paths = sorted(directory.glob("*.json"))
+    elif isinstance(payload_sha256, str) and re.fullmatch(r"[a-f0-9]{64}", payload_sha256):
+        path = directory / f"{payload_sha256}.json"
+        paths = [path] if path.exists() else []
+    else:
+        return 0
+    for path in paths:
+        path.unlink()
+    return len(paths)
+
+
 def translate(value: Any, names: dict[str, str], found: set[str], missing: set[str]) -> Any:
     """``value`` with every known pseudonym replaced, in strings and in keys."""
     def sub(match) -> str:

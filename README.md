@@ -25,12 +25,22 @@ profiler-client prepare spans.json --keep-names -o analysis-ready
 profiler-client inspect analysis-ready
 profiler-client validate analysis-ready
 profiler-client open report.json
+profiler-client forget report.json   # delete the local name list for that dataset
 profiler-client version
 ```
 
-`prepare` saves pseudonym-to-name mappings in a private local directory. Use
-`--no-name-list` to skip that. After downloading a report JSON, `open` writes
-a local HTML copy with matching names restored; no report data is sent anywhere.
+`prepare` saves a pseudonym-to-name list for the dataset in a private local
+directory (`$XDG_DATA_HOME/profiler-client/names/`, `~/.local/share/...` by
+default), mode 0600, outside the dataset directory — so it is never uploaded.
+It holds names only: inputs, outputs, ids and prompts are never written. Use
+`--no-name-list` to skip saving it, and `profiler-client forget <report.json>`
+(or a dataset hash, or `--all`) to delete it.
+
+After downloading a report JSON, `open` writes a local HTML copy with matching
+names restored, owner-only (mode 0600); no report data is sent anywhere. It
+restores only from the list for that exact dataset, says how many pseudonyms it
+couldn't match, and — since the HTML holds your real values — keep it local
+rather than re-uploading or sharing it.
 
 `prepare` reads only the files you name: directories and symlinks are
 refused, and it prints the list before reading. It writes `events.jsonl` and
