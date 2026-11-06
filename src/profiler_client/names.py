@@ -2,6 +2,11 @@
 the step names the user chose -- workflow, agent, node and tool names --
 in clear text.
 
+Every name that becomes a pseudonym is also remembered in ``seen``
+(pseudonym -> name), so ``prepare`` can keep a name list on this machine
+and ``open`` can put the names back into a report. Inputs, outputs and
+ids are never remembered.
+
 Only name-like strings are kept: one word of ``[A-Za-z0-9_./-]``, at most
 80 characters. A sentence, a command or anything with spaces stays a
 pseudonym even with ``--keep-names``. Every kept name is recorded in the
@@ -27,8 +32,17 @@ class Names:
         self.ps = ps
         self.keep = keep
         self.kept: set[str] = set()
+        self.seen: dict[str, str] = {}
+
+    def _named(self, domain: str, value: Any) -> str:
+        token = self.ps.token(domain, value)
+        if domain in ("name", "model") and isinstance(value, str):
+            self.seen[token] = value
+        return token
 
     def token(self, domain: str, value: Any) -> str:
+        if domain in ("name", "model"):
+            return self._named(domain, value)
         return self.ps.token(domain, value)
 
     def step(self, value: Any, domain: str = "name") -> str:
@@ -36,7 +50,7 @@ class Names:
         if self.keep and isinstance(value, str) and KEEPABLE.fullmatch(value):
             self.kept.add(value)
             return value
-        return self.ps.token(domain, value)
+        return self._named(domain, value)
 
     def steps(self, value: str, sep: str) -> str:
         """Several step names joined by ``sep`` (``a+b``, ``a + b``)."""
@@ -47,7 +61,7 @@ class Names:
             return None
         if isinstance(value, str) and value.startswith(policy.MODEL_PREFIXES) and MODEL.fullmatch(value):
             return value
-        return self.ps.token("model", value)
+        return self._named("model", value)
 
 
 def version(value: Any) -> str | None:
