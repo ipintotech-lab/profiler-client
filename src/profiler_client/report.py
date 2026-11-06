@@ -4,7 +4,9 @@
 workflow, agent, step, tool or model name next to the name -- in
 ``$XDG_DATA_HOME/profiler-client/names/`` (``~/.local/share/...``), mode
 0600, outside the dataset directory, so it is never uploaded. It holds
-names only: inputs, outputs, ids and prompts are never written.
+names, plus the values of event-log input fields that take only a few
+short values (``Names.field_values``); outputs, ids, prompts and any
+other input are never written.
 
 ``open`` reads a downloaded report JSON, replaces every pseudonym it finds
 in the name lists, and writes a self-contained HTML page you can read or

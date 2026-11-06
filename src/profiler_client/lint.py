@@ -83,6 +83,8 @@ def check_event(event: dict, kept: frozenset[str] = frozenset()) -> list[str]:
                     _check_string(f"input_state.{k}", v, isinstance(v, str) and bool(_TOKEN_RE.match(v)), problems)
                 elif k == "trigger":
                     _check_string(f"input_state.{k}", v, isinstance(v, str) and _is_phrase(v, kept), problems)
+                elif (_TOKEN_RE.match(k) or k in kept) and isinstance(v, str) and _TOKEN_RE.match(v):
+                    pass  # an event log's field: a pseudonym or kept name, its value a pseudonym
                 else:
                     problems.append(f"input_state.{k}")
         elif key == "decision":

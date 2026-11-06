@@ -39,7 +39,7 @@ def _prepare(args: argparse.Namespace) -> int:
     manifest = prepare(paths, Path(args.output), names)
     if not args.no_name_list:
         seal, _ = read_sealed((Path(args.output) / EVENTS).read_bytes())
-        write_name_list(seal["payload_sha256"], names.seen)
+        write_name_list(seal["payload_sha256"], {**names.seen, **names.field_values()})
     print(f"wrote {manifest['events']} events from {manifest['sessions']} session(s) "
           f"({manifest['source_format']}) to {args.output}", file=sys.stderr)
     if manifest["kept_names"]:
