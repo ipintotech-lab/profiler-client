@@ -32,6 +32,7 @@ jobs:
         with:
           repository: ipintotech-lab/agents_profiler
           ref: main
+          token: ${{ secrets.SERVER_REPO_READ_TOKEN }}
           path: agents-profiler
       - uses: actions/setup-python@v5
         with:
