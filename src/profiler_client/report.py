@@ -205,7 +205,7 @@ def render_html(report: dict, title: str, restored: int | None = None, unmatched
             f'<i class="rep" style="width:{width(s["repeat"])}%"></i></div></td>'
             f'<td class="num">{_money(s.get("total_cost"))}<span class="note">{_share(s.get("total_cost") or 0, cost)}</span></td>'
             f'<td>{_repeats(s)}</td></tr>'
-            + (f'<tr class="try"><td colspan="4">' + "<br>".join(f"<strong>Try:</strong> {a}" for a in acts) + "</td></tr>"
+            + ('<tr class="try"><td colspan="4">' + "<br>".join(f"<strong>Try:</strong> {a}" for a in acts) + "</td></tr>"
                if acts else ""))
 
     gaps = [g for g in (report.get("data_quality") or {}).get("gaps") or [] if g.get("key") != "user_input"]

@@ -63,7 +63,7 @@ def _open(args: argparse.Namespace) -> int:
     source = Path(args.report)
     report = json.loads(source.read_text(encoding="utf-8"))
     if not isinstance(report, dict):
-        raise ValueError("report JSON must contain an object")
+        raise TypeError("report JSON must contain an object")
     payload_sha256 = report.get("payload_sha256")
     found: set[str] = set()
     missing: set[str] = set()
