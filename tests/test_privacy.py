@@ -199,6 +199,30 @@ def test_open_restores_names_from_matching_payload_hash(tmp_path, monkeypatch):
     assert node_token not in rendered
 
 
+def test_open_without_a_hash_never_borrows_another_datasets_names(tmp_path, monkeypatch):
+    # a name list exists for one dataset; a report that carries no hash (or a
+    # different one) must not be decoded against it -- the old load-everything leak
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    names_dir = tmp_path / "profiler-client" / "names"
+    other_token = "h:" + "1" * 64
+    write_name_list("b" * 64, {other_token: "billing-workflow"}, names_dir)
+
+    foreign_token = "h:" + "9" * 64
+    report = {
+        "observe": {"selected_workflow": foreign_token, "workflows": [{"name": foreign_token, "num_runs": 1}]},
+        "summary": {"totals": {"cost": 1, "runs": 1, "llm_calls": 0, "tool_calls": 1, "tokens": 0}},
+        "mine": {"by_agent": {"agent": {"actions": [{"node": other_token, "occurrences": 1, "total_cost": 1}]}}},
+    }
+    for payload in (report, {**report, "payload_sha256": "c" * 64}):  # no hash, and a non-matching hash
+        source = tmp_path / "report.json"
+        source.write_text(json.dumps(payload))
+        output = tmp_path / "report.html"
+        assert cli.main(["open", str(source), "-o", str(output)]) == 0
+        rendered = output.read_text()
+        assert "billing-workflow" not in rendered  # the other dataset's name never leaks in
+        assert other_token[2:9] in rendered  # the pseudonym is shown instead
+
+
 def test_runs_with_the_network_disabled(tmp_path, transcript_file, monkeypatch, capsys):
     def no_network(*args, **kwargs):
         raise AssertionError("profiler-client tried to open a socket")
@@ -210,3 +234,7 @@ def test_runs_with_the_network_disabled(tmp_path, transcript_file, monkeypatch, 
     assert cli.main(["validate", str(out)]) == 0
     assert cli.main(["inspect", str(out)]) == 0
     assert cli.main(["version"]) == 0
+    # open is local too: a downloaded report is decoded with no network
+    report = out.with_suffix(".report.json")
+    report.write_text(json.dumps({"summary": {"totals": {}}, "observe": {}, "mine": {}}))
+    assert cli.main(["open", str(report), "-o", str(tmp_path / "r.html")]) == 0
