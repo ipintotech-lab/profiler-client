@@ -11,7 +11,9 @@ from __future__ import annotations
 
 # 2: Codex CLI's built-in tools, ``gpt-``/``o``-series model ids and OpenAI
 #    finish reasons, for Codex sessions and OpenAI chat trajectories.
-POLICY_VERSION = "2"
+# 3: an event log's input is one pseudonym per field, under the field's name
+#    (a pseudonym, or kept with --keep-names), instead of one for the whole input.
+POLICY_VERSION = "3"
 
 # Claude Code's built-in tools. Any other tool name (MCP, custom) is a pseudonym.
 BUILTIN_TOOLS = frozenset({

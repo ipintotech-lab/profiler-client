@@ -267,3 +267,12 @@ def test_runs_with_the_network_disabled(tmp_path, transcript_file, monkeypatch, 
     report = out.with_suffix(".report.json")
     report.write_text(json.dumps({"summary": {"totals": {}}, "observe": {}, "mine": {}}))
     assert cli.main(["open", str(report), "-o", str(tmp_path / "r.html")]) == 0
+
+
+def test_lint_takes_an_input_field_only_as_a_pseudonym_under_a_pseudonym_or_kept_name():
+    t = "h:" + "0" * 64
+    base = {"trace_id": t, "run_id": t, "workflow": t, "event_type": "tool_call", "node": t}
+    assert check_event({**base, "input_state": {t: t}}) == []
+    assert check_event({**base, "input_state": {"band": t}}, kept={"band"}) == []
+    assert check_event({**base, "input_state": {"band": t}}) == ["input_state.band"]
+    assert check_event({**base, "input_state": {t: "<1%"}}) == [f"input_state.{t}"]

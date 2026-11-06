@@ -121,7 +121,7 @@ def _convert(raw: dict, names: Names) -> dict:
     if trigger is not None:
         event["trigger"] = "user_prompt" if trigger == "user_prompt" else names.steps(str(trigger), " + ")
     if isinstance(raw.get("input_state"), dict):
-        event["input_state"] = {"input": names.token("input", raw["input_state"])}
+        event["input_state"] = names.input_fields(raw["input_state"])
     result, error = _get(raw, "result"), raw.get("error")
     status = "error" if error or str(raw.get("status", "")).lower() in _ERROR_STATUSES else "success"
     if result is not None or error:

@@ -32,7 +32,10 @@ profiler-client version
 `prepare` saves a pseudonym-to-name list for the dataset in a private local
 directory (`$XDG_DATA_HOME/profiler-client/names/`, `~/.local/share/...` by
 default), mode 0600, outside the dataset directory — so it is never uploaded.
-It holds names only: inputs, outputs, ids and prompts are never written. Use
+It holds names, plus the values of your event log's input fields that take at
+most 20 short values (a band, a status, a flag), so a report can say
+`defect_band=<1%`. Outputs, ids, prompts and every other input are never
+written. Use
 `--no-name-list` to skip saving it, and `profiler-client forget <report.json>`
 (or a dataset hash, or `--all`) to delete it.
 
@@ -86,7 +89,12 @@ on it becomes a pseudonym.
 
 A pseudonym is `h:` plus HMAC-SHA256 of the value under a secret key. Equal
 values get equal pseudonyms, which is all the profiler needs to tell whether
-an operation gave the same output for the same input. Without the key nobody
+an operation gave the same output for the same input. Your own event log's
+input gets one pseudonym per field, so the profiler can tell which field
+decides an answer; the field names are pseudonyms too unless you pass
+`--keep-names`. This shows how many fields an input has and which calls share
+a field's value, never the value itself. Other formats keep one pseudonym for
+the whole input, so a custom tool's argument names never leave the machine. Without the key nobody
 can check a guess. By default every `prepare` uses a fresh key that isn't kept,
 so two datasets can't be linked. To compare datasets over time, pass
 `--key-file ~/.config/profiler-client/key`; the file is created with mode 0600.

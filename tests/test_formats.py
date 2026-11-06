@@ -233,7 +233,7 @@ def test_event_log_aliases_and_dropped_fields(tmp_path):
 
 def test_keep_names_keeps_single_word_names_only_and_lists_them(tmp_path):
     out, manifest, events = _prepare(tmp_path, "events", keep=True)
-    assert manifest["kept_names"] == ["acme-agent", "acme-secret-project", "corp_cli"]
+    assert manifest["kept_names"] == ["acme-agent", "acme-secret-project", "cmd", "corp_cli", "token"]
     llm, tool = events
     assert tool["node"] == "corp_cli" and tool["tool"] == {"name": "corp_cli"}
     assert llm["workflow"] == "acme-secret-project" and llm["decision"]["selected"] == "corp_cli"
@@ -269,7 +269,7 @@ def test_cli_prints_the_format_and_kept_names(tmp_path, capsys):
     path = FORMATS["events"](tmp_path)
     assert cli.main(["prepare", str(path), "-o", str(tmp_path / "out"), "--keep-names"]) == 0
     err = capsys.readouterr().err
-    assert "(events)" in err and "3 name(s) kept in clear text" in err
+    assert "(events)" in err and "5 name(s) kept in clear text" in err
 
 
 def test_a_document_that_is_no_trace_format_is_refused(tmp_path):
@@ -277,3 +277,30 @@ def test_a_document_that_is_no_trace_format_is_refused(tmp_path):
     path.write_text(json.dumps({"rows": [{"trace_id": "t"}]}, indent=2))
     with pytest.raises(PrepareError, match="FORMAT_UNSUPPORTED"):
         prepare([path], tmp_path / "out", Names(Pseudonymizer(new_key())))
+
+
+def test_an_event_log_input_is_one_pseudonym_per_field(tmp_path):
+    _, _, events = _prepare(tmp_path, "events")
+    (tool,) = [e for e in events if e["event_type"] == "tool_call"]
+    assert len(tool["input_state"]) == 2  # cmd and token, names and values pseudonyms
+    assert all(k.startswith("h:") and v.startswith("h:") for k, v in tool["input_state"].items())
+    (tmp_path / "kept").mkdir()
+    _, manifest, kept = _prepare(tmp_path / "kept", "events", keep=True)
+    (tool,) = [e for e in kept if e["event_type"] == "tool_call"]
+    assert set(tool["input_state"]) == {"cmd", "token"} and {"cmd", "token"} <= set(manifest["kept_names"])
+    assert all(v.startswith("h:") for v in tool["input_state"].values())
+
+
+def test_the_same_value_in_two_fields_does_not_match():
+    names = Names(Pseudonymizer(new_key()))
+    fields = names.input_fields({"from": "Lisbon", "to": "Lisbon"})
+    assert len(set(fields.values())) == 2
+    assert names.input_fields({"to": "Lisbon"}) == {k: v for k, v in fields.items() if k == names.step("to")}
+
+
+def test_only_fields_with_few_short_values_are_remembered():
+    names = Names(Pseudonymizer(new_key()))
+    for i in range(30):
+        names.input_fields({"band": ["<1%", "1-3%", ">3%"][i % 3], "batch_id": f"B-{i}", "flag": i % 2 == 0,
+                            "note": "x" * 50, "items": [i]})
+    assert sorted(names.field_values().values()) == ["1-3%", "<1%", ">3%", "false", "true"]
