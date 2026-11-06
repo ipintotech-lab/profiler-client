@@ -98,7 +98,10 @@ the whole input, so a custom tool's argument names never leave the machine. With
 can check a guess. By default every `prepare` uses a fresh key that isn't kept,
 so two datasets can't be linked. To compare datasets over time, pass
 `--key-file ~/.config/profiler-client/key`; the file is created with mode 0600.
-If you lose it, you can no longer compare.
+If you lose it, you can no longer compare. The seal records a `key_id` that
+names the key without revealing it: the server combines several datasets into
+one report only when they share a key, and `open` restores names from each of
+the datasets a combined report lists.
 
 Before writing anything, `prepare` runs a privacy lint over every event. Every
 string must be a pseudonym, built from policy words or a kept name listed in

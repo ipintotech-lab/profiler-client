@@ -66,6 +66,16 @@ def _inspect(args: argparse.Namespace) -> int:
     return 0
 
 
+def _dataset_hashes(report: dict) -> list[str]:
+    """The datasets a report was made from: ``payload_sha256s`` for a
+    report over several, else ``payload_sha256``."""
+    many = report.get("payload_sha256s")
+    if isinstance(many, list) and many and all(isinstance(h, str) and HEX64.fullmatch(h) for h in many):
+        return many
+    one = report.get("payload_sha256")
+    return [one] if isinstance(one, str) else []
+
+
 def _open(args: argparse.Namespace) -> int:
     source = Path(args.report)
     raw = source.read_bytes()
@@ -77,10 +87,16 @@ def _open(args: argparse.Namespace) -> int:
         raise ValueError("report is nested too deeply to read") from None
     if not isinstance(report, dict):
         raise TypeError("report JSON must contain an object")
-    payload_sha256 = report.get("payload_sha256")
+    hashes = _dataset_hashes(report)
     found: set[str] = set()
     missing: set[str] = set()
-    names = read_name_lists(payload_sha256=payload_sha256) if isinstance(payload_sha256, str) else {}
+    names: dict[str, str] = {}
+    unlisted = []
+    for digest in hashes:
+        listed = read_name_lists(payload_sha256=digest)
+        if not listed:
+            unlisted.append(digest)
+        names.update(listed)
     try:
         report = translate(report, names, found, missing)
     except RecursionError:
@@ -97,10 +113,10 @@ def _open(args: argparse.Namespace) -> int:
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(render_html(report, title, restored=len(found), unmatched=len(missing)))
     # say plainly what was and wasn't restored, so a half-restored report isn't mistaken for a full one
-    if not isinstance(payload_sha256, str):
+    if not hashes:
         print("this report has no dataset hash (payload_sha256), so names were not restored")
-    elif not names:
-        print(f"no name list on this machine for dataset {payload_sha256[:12]}…, so names were not restored")
+    for digest in unlisted:
+        print(f"no name list on this machine for dataset {digest[:12]}…, so its names were not restored")
     print(f"restored {len(found)} name(s); {len(missing)} pseudonym(s) had no match")
     print(f"{'replaced' if replaced else 'wrote'} {output}")
     return 0
@@ -113,13 +129,14 @@ def _forget(args: argparse.Namespace) -> int:
     if not args.target:
         raise ValueError("give a report JSON or a dataset hash, or use --all")
     if HEX64.fullmatch(args.target):
-        digest = args.target
+        digests = [args.target]
     else:
         report = json.loads(Path(args.target).read_bytes().decode("utf-8"))
-        digest = report.get("payload_sha256") if isinstance(report, dict) else None
-        if not isinstance(digest, str) or not HEX64.fullmatch(digest):
+        digests = [d for d in _dataset_hashes(report) if HEX64.fullmatch(d)] if isinstance(report, dict) else []
+        if not digests:
             raise ValueError("that report has no dataset hash (payload_sha256) to forget")
-    print(f"removed {forget_name_lists(payload_sha256=digest)} name list(s) for dataset {digest[:12]}…")
+    for digest in digests:
+        print(f"removed {forget_name_lists(payload_sha256=digest)} name list(s) for dataset {digest[:12]}…")
     return 0
 
 

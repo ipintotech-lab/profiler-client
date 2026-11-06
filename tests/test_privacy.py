@@ -276,3 +276,42 @@ def test_lint_takes_an_input_field_only_as_a_pseudonym_under_a_pseudonym_or_kept
     assert check_event({**base, "input_state": {"band": t}}, kept={"band"}) == []
     assert check_event({**base, "input_state": {"band": t}}) == ["input_state.band"]
     assert check_event({**base, "input_state": {t: "<1%"}}) == [f"input_state.{t}"]
+
+
+def test_the_seal_names_the_key_so_datasets_sharing_it_can_be_combined(tmp_path, transcript_file):
+    key_file = tmp_path / "key"
+    ids = []
+    for out, key in (("a", ["--key-file", str(key_file)]), ("b", ["--key-file", str(key_file)]), ("c", [])):
+        assert cli.main(["prepare", str(transcript_file), "-o", str(tmp_path / out), "--no-name-list", *key]) == 0
+        seal, _ = read_sealed((tmp_path / out / EVENTS).read_bytes())
+        manifest, _ = validate(tmp_path / out)
+        assert seal["key_id"] == manifest["key_id"]
+        ids.append(seal["key_id"])
+    # the same key file gives the same id; a fresh key a different one
+    assert ids[0] == ids[1] != ids[2]
+    # the id doesn't reveal the key
+    assert ids[0] not in key_file.read_text()
+    bad = sealed_payload([], frozenset(), "NOT-HEX")
+    with pytest.raises(PrepareError, match="key_id"):
+        read_sealed(bad)
+
+
+def test_open_restores_names_from_every_dataset_of_a_combined_report(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    names_dir = tmp_path / "profiler-client" / "names"
+    first, second, absent = "a" * 64, "b" * 64, "c" * 64
+    write_name_list(first, {"h:" + "1" * 64: "billing-workflow"}, names_dir)
+    write_name_list(second, {"h:" + "2" * 64: "calculate-total"}, names_dir)
+    source = tmp_path / "report.json"
+    source.write_text(json.dumps({
+        "payload_sha256": first,
+        "payload_sha256s": [first, second, absent],
+        "observe": {"selected_workflow": "h:" + "1" * 64, "workflows": [{"name": "h:" + "1" * 64, "num_runs": 1}]},
+        "mine": {"by_agent": {"agent": {"actions": [{"node": "h:" + "2" * 64, "occurrences": 1, "total_cost": 1}]}}},
+    }))
+    assert cli.main(["open", str(source), "-o", str(tmp_path / "report.html")]) == 0
+    rendered = (tmp_path / "report.html").read_text()
+    assert "billing-workflow" in rendered and "calculate-total" in rendered
+    assert f"no name list on this machine for dataset {absent[:12]}" in capsys.readouterr().out
+    assert cli.main(["forget", str(source)]) == 0
+    assert list(names_dir.glob("*.json")) == []
