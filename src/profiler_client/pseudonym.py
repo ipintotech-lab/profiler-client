@@ -9,6 +9,10 @@ The key never leaves the machine and is never written next to the
 prepared data. By default every ``prepare`` uses a fresh key, so two
 datasets can't be joined; a persistent key file is opt-in, for comparing
 runs over time, and losing it breaks that comparison.
+
+``key_id`` names the key without revealing it, so the server can tell
+whether two datasets share a key -- and can be combined into one report --
+which their equal pseudonyms would already show.
 """
 from __future__ import annotations
 
@@ -43,6 +47,10 @@ class Pseudonymizer:
             raise ValueError(f"unknown pseudonym domain {domain!r}")
         mac = hmac.new(self._key, domain.encode() + b"\0" + canonical(value), hashlib.sha256)
         return "h:" + mac.hexdigest()
+
+    def key_id(self) -> str:
+        """16 hex characters naming the key; equal only for the same key."""
+        return hmac.new(self._key, b"key-id", hashlib.sha256).hexdigest()[:16]
 
 
 def new_key() -> bytes:

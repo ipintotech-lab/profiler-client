@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
 from collections import Counter
 from pathlib import Path
@@ -35,6 +36,8 @@ from .events import convert_event_log, is_event_log
 from .lint import check_event
 from .names import KEEPABLE, Names
 from .otel import convert_otel_export, is_otel_export
+
+KEY_ID = re.compile(r"[0-9a-f]{16}")
 
 MAX_LINE_BYTES = 16 * 1024 * 1024
 MAX_FILE_BYTES = 1024 * 1024 * 1024
@@ -137,7 +140,7 @@ def prepare(paths: list[Path], out_dir: Path, names: Names) -> dict:
     kept = frozenset(names.kept)
     _check(events, kept)
 
-    payload = sealed_payload(events, kept)
+    payload = sealed_payload(events, kept, names.ps.key_id())
     manifest = {
         "dataset_id": secrets.token_hex(16),
         "client_version": __version__,
@@ -149,6 +152,7 @@ def prepare(paths: list[Path], out_dir: Path, names: Names) -> dict:
         "sessions_without_cost": sessions_without_cost,
         "events": len(events),
         "kept_names": sorted(kept),
+        "key_id": names.ps.key_id(),
         "payload_sha256": hashlib.sha256(payload).hexdigest(),
     }
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -157,8 +161,9 @@ def prepare(paths: list[Path], out_dir: Path, names: Names) -> dict:
     return manifest
 
 
-def sealed_payload(events: list[dict], kept: frozenset[str]) -> bytes:
-    """``events.jsonl``'s bytes: the seal line, then one event per line."""
+def sealed_payload(events: list[dict], kept: frozenset[str], key_id: str | None = None) -> bytes:
+    """``events.jsonl``'s bytes: the seal line, then one event per line.
+    ``key_id`` (``Pseudonymizer.key_id``) says which datasets share a key."""
     body = "".join(json.dumps(e, ensure_ascii=False, sort_keys=True) + "\n" for e in events).encode()
     seal = {
         "client_version": __version__,
@@ -168,6 +173,8 @@ def sealed_payload(events: list[dict], kept: frozenset[str]) -> bytes:
         "kept_names": sorted(kept),
         "payload_sha256": hashlib.sha256(body).hexdigest(),
     }
+    if key_id is not None:
+        seal["key_id"] = key_id
     return json.dumps({SEAL: seal}, sort_keys=True).encode() + b"\n" + body
 
 
@@ -198,6 +205,8 @@ def read_sealed(payload: bytes) -> tuple[dict, list[dict]]:
     kept = seal.get("kept_names")
     if not isinstance(kept, list) or not all(isinstance(k, str) and KEEPABLE.fullmatch(k) for k in kept):
         raise PrepareError("SEAL_INVALID", "kept_names must be a list of single-word names")
+    if "key_id" in seal and not (isinstance(seal["key_id"], str) and KEY_ID.fullmatch(seal["key_id"])):
+        raise PrepareError("SEAL_INVALID", "key_id must be 16 lowercase hex characters")
     _check(events, frozenset(kept))
     return seal, events
 
