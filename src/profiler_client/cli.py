@@ -63,14 +63,22 @@ def _open(args: argparse.Namespace) -> int:
     source = Path(args.report)
     report = json.loads(source.read_text(encoding="utf-8"))
     if not isinstance(report, dict):
-        raise ValueError("report JSON must contain an object")
+        raise TypeError("report JSON must contain an object")
+    payload_sha256 = report.get("payload_sha256")
     found: set[str] = set()
     missing: set[str] = set()
-    report = translate(report, read_name_lists(payload_sha256=report.get("payload_sha256")), found, missing)
+    names = read_name_lists(payload_sha256=payload_sha256) if isinstance(payload_sha256, str) else {}
+    report = translate(report, names, found, missing)
     observe = report.get("observe")
     title = (observe.get("selected_workflow") if isinstance(observe, dict) else None) or source.stem
     output = Path(args.output) if args.output else source.with_suffix(".html")
-    output.write_text(render_html(report, title), encoding="utf-8")
+    output.write_text(render_html(report, title, restored=len(found), unmatched=len(missing)), encoding="utf-8")
+    # say plainly what was and wasn't restored, so a half-restored report isn't mistaken for a full one
+    if not isinstance(payload_sha256, str):
+        print("this report has no dataset hash (payload_sha256), so names were not restored")
+    elif not names:
+        print(f"no name list on this machine for dataset {payload_sha256[:12]}…, so names were not restored")
+    print(f"restored {len(found)} name(s); {len(missing)} pseudonym(s) had no match")
     print(f"wrote {output}")
     return 0
 

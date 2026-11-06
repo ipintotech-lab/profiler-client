@@ -46,24 +46,25 @@ def write_name_list(payload_sha256: str, names: dict[str, str], directory: Path 
 
 
 def read_name_lists(directory: Path | None = None, payload_sha256: str | None = None) -> dict[str, str]:
-    """Name mappings for one payload, or all mappings for legacy reports."""
+    """The name mapping for one payload, by its hash.
+
+    Without a valid ``payload_sha256`` this returns nothing: a report that
+    carries no hash is never matched against the name lists of *other*
+    datasets. (Earlier this merged every list on the machine when no hash
+    was given, which could put one dataset's names into another's report.)
+    """
     directory = directory or name_list_dir()
     names: dict[str, str] = {}
-    if payload_sha256 is not None:
-        if not isinstance(payload_sha256, str) or not re.fullmatch(r"[a-f0-9]{64}", payload_sha256):
-            return names
-        paths = [directory / f"{payload_sha256}.json"]
-    else:
-        paths = sorted(directory.glob("*.json")) if directory.is_dir() else []
-    for path in paths:
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if (isinstance(data, dict) and isinstance(data.get("names"), dict)
-                and (payload_sha256 is None or data.get("payload_sha256") == payload_sha256)):
-            names.update({k: v for k, v in data["names"].items()
-                          if isinstance(k, str) and isinstance(v, str) and TOKEN.fullmatch(k)})
+    if not isinstance(payload_sha256, str) or not re.fullmatch(r"[a-f0-9]{64}", payload_sha256):
+        return names
+    try:
+        data = json.loads((directory / f"{payload_sha256}.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return names
+    if (isinstance(data, dict) and isinstance(data.get("names"), dict)
+            and data.get("payload_sha256") == payload_sha256):
+        names.update({k: v for k, v in data["names"].items()
+                      if isinstance(k, str) and isinstance(v, str) and TOKEN.fullmatch(k)})
     return names
 
 
@@ -168,7 +169,7 @@ def _tries(s: dict, cost: float) -> list[str]:
     return acts
 
 
-def render_html(report: dict, title: str) -> str:
+def render_html(report: dict, title: str, restored: int | None = None, unmatched: int | None = None) -> str:
     summary = report.get("summary") or {}
     t = summary.get("totals") or {}
     cost = t.get("cost") or 0
@@ -204,11 +205,23 @@ def render_html(report: dict, title: str) -> str:
             f'<i class="rep" style="width:{width(s["repeat"])}%"></i></div></td>'
             f'<td class="num">{_money(s.get("total_cost"))}<span class="note">{_share(s.get("total_cost") or 0, cost)}</span></td>'
             f'<td>{_repeats(s)}</td></tr>'
-            + (f'<tr class="try"><td colspan="4">' + "<br>".join(f"<strong>Try:</strong> {a}" for a in acts) + "</td></tr>"
+            + ('<tr class="try"><td colspan="4">' + "<br>".join(f"<strong>Try:</strong> {a}" for a in acts) + "</td></tr>"
                if acts else ""))
 
     gaps = [g for g in (report.get("data_quality") or {}).get("gaps") or [] if g.get("key") != "user_input"]
     grade = report.get("grade") or {}
+
+    # be honest in the header about how much was restored: with nothing matched,
+    # don't claim "your own names" -- the page is still pseudonymized
+    if restored:
+        opened = "Opened on your machine with your own names"
+        restored_note = (f" · {_plural(unmatched, 'pseudonym')} not matched" if unmatched else "")
+    elif unmatched:
+        opened = "Opened on your machine · no names restored, pseudonyms shown"
+        restored_note = ""
+    else:
+        opened = "Opened on your machine"
+        restored_note = ""
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)}</title>
@@ -245,7 +258,7 @@ def render_html(report: dict, title: str) -> str:
 </style></head>
 <body><main>
   <h1>{html.escape(title)}</h1>
-  <div class="meta">{f"Dataset grade {html.escape(str(grade.get('grade')))} ({html.escape(str(grade.get('word', '')).lower())}) · " if grade.get("grade") else ""}Opened on your machine with your own names</div>
+  <div class="meta">{f"Dataset grade {html.escape(str(grade.get('grade')))} ({html.escape(str(grade.get('word', '')).lower())}) · " if grade.get("grade") else ""}{opened}{restored_note}</div>
   <p class="totals">{_money(cost)} across {_plural(t.get("runs") or 0, "run")}, {_plural(t.get("llm_calls") or 0, "LLM call")} and {_plural(t.get("tool_calls") or 0, "tool call")}, {t.get("tokens") or 0:,} tokens.</p>
   {scope}
   <h2>Where the money went</h2>
