@@ -103,6 +103,16 @@ names the key without revealing it: the server combines several datasets into
 one report only when they share a key, and `open` restores names from each of
 the datasets a combined report lists.
 
+An LLM call's input is dropped by default, so the report can't tell whether
+the model was asked the same thing twice. With `--llm-inputs` (Claude Code,
+Codex and chat trajectories) each LLM call also gets one pseudonym of
+everything the model read in its conversation so far, with call ids and
+signatures left out so a re-run of the same conversation matches. The text
+itself never leaves your machine, and the manifest records `llm_inputs`.
+Two calls match only if their whole conversation matched up to that point, so
+this finds repeats across re-runs of the same task, not inside one growing
+chat. Claude Code transcripts don't hold its system prompt.
+
 Before writing anything, `prepare` runs a privacy lint over every event. Every
 string must be a pseudonym, built from policy words or a kept name listed in
 the manifest, otherwise nothing is written and the error names the field, never the value. `validate` runs it
