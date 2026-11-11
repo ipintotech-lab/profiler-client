@@ -152,6 +152,7 @@ def prepare(paths: list[Path], out_dir: Path, names: Names) -> dict:
         "sessions_without_cost": sessions_without_cost,
         "events": len(events),
         "kept_names": sorted(kept),
+        "llm_inputs": names.llm_inputs,
         "key_id": names.ps.key_id(),
         "payload_sha256": hashlib.sha256(payload).hexdigest(),
     }

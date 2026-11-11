@@ -20,15 +20,21 @@ so the profiler can tell which field decides an answer. For ``open`` only,
 the values of a field that takes few short values (a band, a status, a
 flag) are remembered on this machine too (``field_values``); a field with
 many values -- ids, emails, free text -- is never remembered.
+
+With ``--llm-inputs`` an LLM call's input is one pseudonym of everything
+the model read in its conversation so far (``llm_input``), so the profiler
+can tell when the model was asked exactly the same thing twice. Only the
+pseudonym leaves the machine; the conversation itself never does.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from typing import Any
 
 from . import policy
-from .pseudonym import Pseudonymizer
+from .pseudonym import Pseudonymizer, canonical
 
 KEEPABLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_./-]{0,79}")
 # a field's values are remembered for ``open`` only while it has at most this
@@ -36,12 +42,40 @@ KEEPABLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_./-]{0,79}")
 MAX_FIELD_VALUES = 20
 MAX_VALUE_CHARS = 40
 MODEL = re.compile(r"[a-z0-9][a-z0-9.-]*")
+# Parts of a transcript that change on every run although the model reads
+# the same thing: the ids pairing a call with its output (their order still
+# pairs them), and signatures and encrypted reasoning.
+VOLATILE = frozenset({"id", "tool_use_id", "tool_call_id", "call_id", "signature", "encrypted_content"})
+
+
+def _stable(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: _stable(v) for k, v in value.items() if k not in VOLATILE}
+    if isinstance(value, list):
+        return [_stable(v) for v in value]
+    return value
+
+
+class Conversation:
+    """Everything a model has read so far in one conversation, as a running
+    SHA-256 over its messages in order. It never leaves the machine: only
+    ``Names.llm_input``'s keyed pseudonym of it does. Off without
+    ``--llm-inputs``, so nothing is hashed."""
+
+    def __init__(self, enabled: bool) -> None:
+        self.enabled = enabled
+        self.digest = hashlib.sha256().hexdigest()
+
+    def add(self, message: Any) -> None:
+        if self.enabled:
+            self.digest = hashlib.sha256(self.digest.encode() + canonical(_stable(message))).hexdigest()
 
 
 class Names:
-    def __init__(self, ps: Pseudonymizer, keep: bool = False) -> None:
+    def __init__(self, ps: Pseudonymizer, keep: bool = False, llm_inputs: bool = False) -> None:
         self.ps = ps
         self.keep = keep
+        self.llm_inputs = llm_inputs
         self.kept: set[str] = set()
         self.seen: dict[str, str] = {}
         # field -> {pseudonym: value}, or None once the field has too many values
@@ -68,6 +102,17 @@ class Names:
     def steps(self, value: str, sep: str) -> str:
         """Several step names joined by ``sep`` (``a+b``, ``a + b``)."""
         return sep.join(self.step(part.strip()) for part in value.split(sep.strip()))
+
+    def conversation(self) -> Conversation:
+        return Conversation(self.llm_inputs)
+
+    def llm_input(self, model: Any, read: Conversation) -> dict[str, str]:
+        """An LLM call's input with ``--llm-inputs``: one pseudonym of the
+        model and everything it read, else nothing. Converters write it into
+        ``input_state`` and set ``input_complete`` to whether it is there."""
+        if not read.enabled:
+            return {}
+        return {"input": self.ps.token("input", ["llm", model, read.digest])}
 
     def input_fields(self, state: dict) -> dict[str, str]:
         """An input, one pseudonym per top-level field. The field name is a

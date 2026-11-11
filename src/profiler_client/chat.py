@@ -14,7 +14,8 @@ function-calling agents and datasets such as ``cx-cmu/agent_trajectories``
 Every tool, workflow and agent name is the user's own, so it is a
 pseudonym unless ``--keep-names``. Ids, arguments and outputs are always
 pseudonyms; message text is dropped. Trajectories carry no cost or
-timing, so those stay 0.
+timing, so those stay 0. With ``--llm-inputs`` an LLM call also records a
+pseudonym of every message before it (``Names.llm_input``).
 """
 from __future__ import annotations
 
@@ -73,7 +74,10 @@ def _convert(record: dict, names: Names, namer: Namer) -> list[dict]:
     open_calls: list[dict] = []  # in call order, waiting for their output
     trigger_parts: set[str] = set()
 
+    read = names.conversation()  # the messages before the current one
     for index, message in enumerate(record["messages"]):
+        if index:
+            read.add(record["messages"][index - 1])
         role = message.get("role")
         if role == "user":
             trigger_parts = {"user_prompt"}
@@ -90,13 +94,15 @@ def _convert(record: dict, names: Names, namer: Namer) -> list[dict]:
             trigger = " + ".join(sorted(trigger_parts)) or "user_prompt"
             trigger_parts = set()
             usage = message.get("usage") if isinstance(message.get("usage"), dict) else {}
+            model = message.get("model") or record_model
+            llm_input = names.llm_input(model, read)
             llm = {
                 **common,
                 "event_type": "decision",
                 "node": llm_node(trigger),
-                "model": names.model(message.get("model") or record_model),
-                "input_state": {"trigger": trigger},
-                "input_complete": False,
+                "model": names.model(model),
+                "input_state": {"trigger": trigger, **llm_input},
+                "input_complete": bool(llm_input),
                 "trigger": trigger,
                 "tokens": {"input": int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0),
                            "output": int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)},

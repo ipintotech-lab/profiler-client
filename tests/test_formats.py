@@ -304,3 +304,27 @@ def test_only_fields_with_few_short_values_are_remembered():
         names.input_fields({"band": ["<1%", "1-3%", ">3%"][i % 3], "batch_id": f"B-{i}", "flag": i % 2 == 0,
                             "note": "x" * 50, "items": [i]})
     assert sorted(names.field_values().values()) == ["1-3%", "<1%", ">3%", "false", "true"]
+
+
+@pytest.mark.parametrize("source", ["codex", "openai-chat"])
+def test_llm_inputs_match_across_runs_with_new_ids_and_never_leak(tmp_path, source):
+    def calls(rows, name):
+        out = tmp_path / name
+        prepare([_write(tmp_path, f"{name}.jsonl", rows)], out, Names(Pseudonymizer(b"k" * 32), llm_inputs=True))
+        written = (out / EVENTS).read_text()
+        for canary in CANARIES:
+            for form in canary_forms(canary):
+                assert form not in written, f"a form of canary {canary!r} leaked from {source}"
+        events = [json.loads(line) for line in written.splitlines()[1:]]
+        return [e for e in events if e["event_type"] == "decision"]
+
+    rows = _codex_rows() if source == "codex" else _chat_rows()
+    # another run of the same conversation: only ids differ
+    text = json.dumps(rows).replace("sess-acme-secret-project-1", "sess-2").replace("traj-acme-secret-project", "traj-2")
+    for old in ("c1", "c2", "c3", "c4", "c5", "c6", '"a"', '"b"'):
+        text = text.replace(f'"{old}"' if not old.startswith('"') else old,
+                            f'"{old}x"' if not old.startswith('"') else old[:-1] + 'x"')
+    first, again = calls(rows, "one"), calls(json.loads(text), "two")
+    assert all(e["input_complete"] and e["input_state"]["input"].startswith("h:") for e in first)
+    assert len({e["input_state"]["input"] for e in first}) == len(first)
+    assert [e["input_state"] for e in again] == [e["input_state"] for e in first]
