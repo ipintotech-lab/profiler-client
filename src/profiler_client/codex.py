@@ -14,7 +14,9 @@ rollout-*.jsonl``) into contract v1 events, with the same rules as
 Kept in clear text: Codex's built-in tool names, policy words,
 ``gpt-``/``o``-series model ids and the CLI version. The project
 directory, ids, MCP tool names, every input and every output are
-pseudonyms; messages, reasoning and timestamps are dropped.
+pseudonyms; messages, reasoning and timestamps are dropped. With
+``--llm-inputs`` an LLM call also records a pseudonym of every item the
+model read in the session so far (``Names.llm_input``).
 
 Codex records no cost, so every session counts in ``sessions_without_cost``.
 Tool output headers that change on every run (chunk id, wall time, token
@@ -147,6 +149,8 @@ def convert_codex_session(rows: list[dict], names: Names) -> Conversion:
     trigger_parts: set[str] = set()
     previous_ms: float | None = None
     count = 0
+    read = names.conversation()  # the items before the current one
+    previous_item: dict | None = None
 
     for r in rows:
         kind, payload = r.get("type"), r.get("payload")
@@ -171,6 +175,9 @@ def convert_codex_session(rows: list[dict], names: Names) -> Conversion:
             continue
         if kind != "response_item" or session is None:
             continue
+        if previous_item is not None:
+            read.add(previous_item)
+        previous_item = payload
 
         item_type = payload.get("type")
         if item_type == "message" and payload.get("role") == "user":
@@ -204,13 +211,14 @@ def convert_codex_session(rows: list[dict], names: Names) -> Conversion:
             count += 1
             trigger = " + ".join(sorted(trigger_parts)) or "user_prompt"
             trigger_parts, open_llm = set(), True
+            llm_input = names.llm_input(model, read)
             llm = {
                 **common,
                 "event_type": "decision",
                 "node": llm_node(trigger),
                 "model": names.model(model),
-                "input_state": {"trigger": trigger},
-                "input_complete": False,
+                "input_state": {"trigger": trigger, **llm_input},
+                "input_complete": bool(llm_input),
                 "trigger": trigger,
                 "tokens": {"input": 0, "output": 0},
                 "decision": {"type": "next_action", "selected": "respond"},

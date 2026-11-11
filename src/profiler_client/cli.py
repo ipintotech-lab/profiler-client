@@ -35,7 +35,7 @@ def _prepare(args: argparse.Namespace) -> int:
     for p in paths:
         print(f"  {p}", file=sys.stderr)
     key = load_or_create_key(Path(args.key_file).expanduser()) if args.key_file else new_key()
-    names = Names(Pseudonymizer(key), keep=args.keep_names)
+    names = Names(Pseudonymizer(key), keep=args.keep_names, llm_inputs=args.llm_inputs)
     manifest = prepare(paths, Path(args.output), names)
     if not args.no_name_list:
         seal, _ = read_sealed((Path(args.output) / EVENTS).read_bytes())
@@ -164,6 +164,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--keep-names", action="store_true",
                    help="keep your workflow, agent, node and tool names readable (single words only); "
                         "inspect lists every kept name")
+    p.add_argument("--llm-inputs", action="store_true",
+                   help="also send, for each LLM call, one pseudonym of everything the model read so far, so the "
+                        "report can tell when a model call repeats; the text itself is never sent "
+                        "(Claude Code, Codex and chat trajectories)")
     p.add_argument("--no-name-list", action="store_true",
                    help="don't keep pseudonym-to-name mappings on this machine")
     p.set_defaults(run=_prepare)

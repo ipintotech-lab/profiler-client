@@ -14,7 +14,10 @@ leaves the machine:
   timestamps (only durations are kept) and working directories.
 
 An LLM call records ``input_complete=False`` (the model also saw the whole
-conversation); a tool call records its whole input, so ``True``.
+conversation); a tool call records its whole input, so ``True``. With
+``--llm-inputs`` an LLM call also records a pseudonym of everything it read
+in its lane so far (``Names.llm_input``), and so ``True``; the transcript
+doesn't hold Claude Code's system prompt, which follows its version.
 
 Cost: transcripts carry only a session-level ``cost-state`` record with
 real USD per model, split across that model's calls by price-weighted
@@ -30,7 +33,7 @@ from datetime import datetime
 from pathlib import PurePosixPath
 
 from . import policy
-from .names import Names, version
+from .names import Conversation, Names, version
 
 # Relative per-token price weights (input = 1), used only to split the
 # session's recorded cost across calls.
@@ -209,6 +212,8 @@ def convert_claude_code_transcript(rows: list[dict], names: Names) -> Conversion
     # Latest record of any type per lane: an LLM call is timed from the
     # record just before its reply, not from its trigger.
     last_seen_ms: dict[str, float] = {}
+    # what the model has read so far, per lane
+    read: dict[str, Conversation] = defaultdict(names.conversation)
 
     for r in rows:
         kind = r.get("type")
@@ -226,6 +231,7 @@ def convert_claude_code_transcript(rows: list[dict], names: Names) -> Conversion
         lane = f"{session}:{sidechain}"
 
         if kind == "user":
+            read[lane].add({"role": "user", "content": r["message"].get("content")})
             if r.get("promptId"):
                 current_prompt[session] = r["promptId"]
             if r.get("isMeta"):
@@ -245,6 +251,7 @@ def convert_claude_code_transcript(rows: list[dict], names: Names) -> Conversion
         raw_model = message.get("model")
         message_id = message.get("id") or r.get("uuid")
         if not message_id or raw_model == _SYNTHETIC_MODEL:
+            read[lane].add({"role": "assistant", "content": message.get("content")})
             continue
 
         # Pin the workflow to the session's first cwd so a mid-session
@@ -261,13 +268,14 @@ def convert_claude_code_transcript(rows: list[dict], names: Names) -> Conversion
         call = llm_calls.get(message_id)
         if call is None:
             trigger = last_trigger.get(lane, "user_prompt")
+            llm_input = names.llm_input(raw_model, read[lane])
             call = {
                 **common,
                 "event_type": "decision",
                 "node": llm_node(trigger),
                 "model": names.model(raw_model),
-                "input_state": {"trigger": trigger},
-                "input_complete": False,
+                "input_state": {"trigger": trigger, **llm_input},
+                "input_complete": bool(llm_input),
                 "trigger": trigger,
                 "_session": session,
                 "_raw_model": raw_model,
@@ -309,6 +317,7 @@ def convert_claude_code_transcript(rows: list[dict], names: Names) -> Conversion
                 "_start_ms": record_ms,
             }
             order.append(("tool", tool_id))
+        read[lane].add({"role": "assistant", "content": message.get("content")})
 
     weights: dict[tuple[str, str], float] = defaultdict(float)
     for call in llm_calls.values():

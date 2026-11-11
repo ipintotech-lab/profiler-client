@@ -315,3 +315,54 @@ def test_open_restores_names_from_every_dataset_of_a_combined_report(tmp_path, m
     assert f"no name list on this machine for dataset {absent[:12]}" in capsys.readouterr().out
     assert cli.main(["forget", str(source)]) == 0
     assert list(names_dir.glob("*.json")) == []
+
+
+# --llm-inputs: one pseudonym of everything the model read, per LLM call
+
+def _llm_inputs(rows, key=b"k" * 32):
+    events = convert_claude_code_transcript(rows, Names(Pseudonymizer(key), llm_inputs=True)).events
+    return [e for e in events if e["event_type"] == "decision"]
+
+
+def _rerun(rows, suffix):
+    """The same conversation in another session: new session, message and tool ids, later timestamps."""
+    text = json.dumps(rows)
+    for old in ("sess-acme-secret-project-1", '"m1"', '"m2"', '"m3"', '"p1"'):
+        text = text.replace(old, old[:-1] + suffix + old[-1] if old.startswith('"') else old + suffix)
+    for i in range(1, 8):
+        text = text.replace(f'"t{i}"', f'"t{i}{suffix}"')
+    return [{**r, "timestamp": "2026-10-02" + r["timestamp"][10:]} if "timestamp" in r else r
+            for r in json.loads(text)]
+
+
+def test_llm_inputs_are_off_by_default(transcript_rows):
+    assert all("input" not in e["input_state"] for e in _events(transcript_rows) if e["event_type"] == "decision")
+
+
+def test_llm_inputs_are_complete_pseudonyms_that_pass_the_lint(tmp_path, transcript_file):
+    calls = _llm_inputs([json.loads(line) for line in transcript_file.read_text().splitlines()])
+    assert all(e["input_state"]["input"].startswith("h:") and e["input_complete"] for e in calls)
+    assert len({e["input_state"]["input"] for e in calls}) == len(calls)  # each call read more than the one before
+    out = tmp_path / "ready"
+    manifest = prepare([transcript_file], out, Names(Pseudonymizer(new_key()), llm_inputs=True))
+    assert manifest["llm_inputs"] is True
+    written = (out / EVENTS).read_text() + (out / "manifest.json").read_text()
+    for canary in CANARIES:
+        for form in canary_forms(canary):
+            assert form not in written, f"a form of canary {canary!r} leaked"
+    validate(out)
+
+
+def test_the_same_conversation_has_the_same_llm_inputs_whatever_its_ids(transcript_rows):
+    first, again = _llm_inputs(transcript_rows), _llm_inputs(_rerun(transcript_rows, "b"))
+    assert [e["input_state"] for e in again] == [e["input_state"] for e in first]
+    assert [e["input_state"] for e in _llm_inputs(transcript_rows, key=b"x" * 32)] != [e["input_state"] for e in first]
+
+
+def test_a_different_tool_output_changes_every_later_llm_input(transcript_rows):
+    changed = [dict(r) for r in transcript_rows]
+    changed[2] = {**changed[2], "message": {"content": [
+        {**c, "content": "On branch dev"} if c["tool_use_id"] == "t1" else c for c in changed[2]["message"]["content"]]}}
+    first, other = _llm_inputs(transcript_rows), _llm_inputs(changed)
+    assert first[0]["input_state"] == other[0]["input_state"]  # read before the output
+    assert all(a["input_state"] != b["input_state"] for a, b in zip(first[1:], other[1:]))

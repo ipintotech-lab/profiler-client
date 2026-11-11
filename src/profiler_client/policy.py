@@ -13,7 +13,9 @@ from __future__ import annotations
 #    finish reasons, for Codex sessions and OpenAI chat trajectories.
 # 3: an event log's input is one pseudonym per field, under the field's name
 #    (a pseudonym, or kept with --keep-names), instead of one for the whole input.
-POLICY_VERSION = "3"
+# 4: with --llm-inputs, an LLM call's input is one pseudonym of everything the
+#    model read in its conversation so far (no text, only the pseudonym).
+POLICY_VERSION = "4"
 
 # Claude Code's built-in tools. Any other tool name (MCP, custom) is a pseudonym.
 BUILTIN_TOOLS = frozenset({
