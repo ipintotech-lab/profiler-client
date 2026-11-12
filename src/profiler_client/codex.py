@@ -139,7 +139,6 @@ class _Codex:
 
 
 def convert_codex_session(rows: list[dict], names: Names) -> Conversion:
-    rows = [r for r in rows if isinstance(r, dict)]
     codex = _Codex(names)
     events: list[dict] = []
     tool_calls: dict[str, dict] = {}
@@ -152,7 +151,9 @@ def convert_codex_session(rows: list[dict], names: Names) -> Conversion:
     read = names.conversation()  # the items before the current one
     previous_item: dict | None = None
 
-    for r in rows:
+    for record, r in enumerate(rows):
+        if not isinstance(r, dict):
+            continue
         kind, payload = r.get("type"), r.get("payload")
         record_ms = ts_ms(r)
         last_ms, previous_ms = previous_ms, record_ms if record_ms is not None else previous_ms
@@ -226,6 +227,7 @@ def convert_codex_session(rows: list[dict], names: Names) -> Conversion:
                 "_id": f"{session}:{count}",
                 "_tools": [],
                 "_start_ms": last_ms,
+                "_source": [record],
             }
             events.append(llm)
         if record_ms is not None and llm["_start_ms"] is not None:
@@ -247,6 +249,7 @@ def convert_codex_session(rows: list[dict], names: Names) -> Conversion:
             "input_complete": True,
             "result": "no_result",
             "_start_ms": record_ms,
+            "_source": [record],
         }
         tool_calls[payload.get("call_id") or f"{session}:{len(events)}"] = call
         events.append(call)

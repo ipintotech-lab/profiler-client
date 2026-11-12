@@ -58,15 +58,21 @@ def _get(raw: dict, field: str) -> Any:
     return next((raw[k] for k in _ALIASES.get(field, (field,)) if raw.get(k) is not None), None)
 
 
-def unwrap(rows: list) -> list:
-    """``[{"events": [...]}]`` (one wrapped document) -> the events."""
+def located(rows: list) -> list[tuple[list, Any]]:
+    """``[{"events": [...]}]`` (one wrapped document) -> the events, each
+    with where it is in ``rows``: ``[0, "events", 3]``."""
     if len(rows) == 1 and isinstance(rows[0], dict):
         for key in _CONTAINERS:
-            if isinstance(rows[0].get(key), list):
-                return unwrap(rows[0][key])
-            if isinstance(rows[0].get(key), dict):
-                return unwrap([rows[0][key]])
-    return rows
+            inner = rows[0].get(key)
+            if isinstance(inner, list):
+                return [([0, key, *where], row) for where, row in located(inner)]
+            if isinstance(inner, dict):  # one event, not in a list: drop the list's index
+                return [([0, key, *where[1:]], row) for where, row in located([inner])]
+    return [([i], row) for i, row in enumerate(rows)]
+
+
+def unwrap(rows: list) -> list:
+    return [row for _, row in located(rows)]
 
 
 def is_event_log(rows: list) -> bool:
@@ -145,7 +151,7 @@ def _convert(raw: dict, names: Names) -> dict:
 
 
 def convert_event_log(rows: list, names: Names) -> Conversion:
-    events = [_convert(r, names) for r in unwrap(rows)]
+    events = [{**_convert(r, names), "_source": where} for where, r in located(rows)]
     traces = {e["trace_id"] for e in events}
     with_cost = {e["trace_id"] for e in events if e.get("cost", 0) > 0}
     return Conversion(events=events, sessions=len(traces), sessions_without_cost=len(traces - with_cost))

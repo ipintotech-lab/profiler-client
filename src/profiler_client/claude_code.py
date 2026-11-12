@@ -60,6 +60,13 @@ class Conversion:
     events: list[dict] = field(default_factory=list)
     sessions: int = 0
     sessions_without_cost: int = 0
+    # where each event came from, for ``show-event``: ``[record, *path]``, the
+    # record's index in the file's rows and the JSON path inside it (or None).
+    # A converter puts it on an event as ``_source``; it is taken off here.
+    sources: list = field(default_factory=list, init=False)
+
+    def __post_init__(self) -> None:
+        self.sources = [event.pop("_source", None) for event in self.events]
 
 
 def is_claude_code_transcript(rows: list) -> bool:
@@ -190,6 +197,7 @@ def _user_trigger(record: dict, tool_nodes_by_id: dict[str, str]) -> str:
 
 
 def convert_claude_code_transcript(rows: list[dict], names: Names) -> Conversion:
+    records = list(enumerate(rows))
     rows = [r for r in rows if isinstance(r, dict)]
     namer = Namer(names)
     ps = names
@@ -215,7 +223,9 @@ def convert_claude_code_transcript(rows: list[dict], names: Names) -> Conversion
     # what the model has read so far, per lane
     read: dict[str, Conversation] = defaultdict(names.conversation)
 
-    for r in rows:
+    for record, r in records:
+        if not isinstance(r, dict):
+            continue
         kind = r.get("type")
         session = r.get("sessionId")
         record_ms = ts_ms(r)
@@ -282,6 +292,7 @@ def convert_claude_code_transcript(rows: list[dict], names: Names) -> Conversion
                 "_raw_model": raw_model,
                 "_tools": [],
                 "_start_ms": previous_ms,
+                "_source": [record],
             }
             llm_calls[message_id] = call
             order.append(("llm", message_id))
@@ -293,7 +304,7 @@ def convert_claude_code_transcript(rows: list[dict], names: Names) -> Conversion
         if record_ms is not None and call["_start_ms"] is not None:
             call["latency_ms"] = max(record_ms - call["_start_ms"], 0.0)
 
-        for block in message.get("content") or []:
+        for position, block in enumerate(message.get("content") or []):
             if not isinstance(block, dict) or block.get("type") != "tool_use":
                 continue
             tool_id, name = block.get("id"), block.get("name") or "unknown"
@@ -317,6 +328,7 @@ def convert_claude_code_transcript(rows: list[dict], names: Names) -> Conversion
                 "input_complete": True,
                 "result": "no_result",
                 "_start_ms": record_ms,
+                "_source": [record, "message", "content", position],
             }
             order.append(("tool", tool_id))
         read[lane].add({"role": "assistant", "content": message.get("content")})

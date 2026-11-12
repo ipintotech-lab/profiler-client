@@ -82,17 +82,19 @@ def _parsed(value: Any) -> Any:
     return value
 
 
-def _spans(rows: list[dict]) -> list[tuple[dict, dict, dict]]:
+def _spans(rows: list[dict]) -> list[tuple[dict, dict, dict, list]]:
+    """Each span with its resource and attributes, and where it is."""
     spans = []
-    for row in rows:
-        for resource_span in row["resourceSpans"]:
+    for record, row in enumerate(rows):
+        for r, resource_span in enumerate(row["resourceSpans"]):
             if not isinstance(resource_span, dict):
                 continue
             resource = _attributes((resource_span.get("resource") or {}).get("attributes"))
-            for scope in resource_span.get("scopeSpans") or []:
-                for span in (scope or {}).get("spans") or []:
+            for s, scope in enumerate(resource_span.get("scopeSpans") or []):
+                for n, span in enumerate((scope or {}).get("spans") or []):
                     if isinstance(span, dict) and span.get("traceId"):
-                        spans.append((resource, _attributes(span.get("attributes")), span))
+                        where = [record, "resourceSpans", r, "scopeSpans", s, "spans", n]
+                        spans.append((resource, _attributes(span.get("attributes")), span, where))
     return spans
 
 
@@ -109,10 +111,11 @@ def _kind(attrs: dict) -> str | None:
 def convert_otel_export(rows: list[dict], names: Names) -> Conversion:
     namer = Namer(names)
     by_trace: dict[str, list] = defaultdict(list)
-    for resource, attrs, span in _spans(rows):
+    for resource, attrs, span, where in _spans(rows):
         kind = _kind(attrs)
         if kind:
-            by_trace[span["traceId"]].append((int(span.get("startTimeUnixNano") or 0), kind, resource, attrs, span))
+            by_trace[span["traceId"]].append((int(span.get("startTimeUnixNano") or 0), kind, resource, attrs, span,
+                                              where))
 
     events: list[dict] = []
     traces_with_cost: set[str] = set()
@@ -120,7 +123,7 @@ def convert_otel_export(rows: list[dict], names: Names) -> Conversion:
         spans.sort(key=lambda s: s[0])
         llm: dict | None = None
         trigger_parts: set[str] = set()
-        for start, kind, resource, attrs, span in spans:
+        for start, kind, resource, attrs, span, where in spans:
             end = int(span.get("endTimeUnixNano") or 0)
             conversation = _first(attrs, "gen_ai.conversation.id", "session.id")
             workflow = _first(attrs, "traceloop.workflow.name") or _first(resource, "service.name") or "otel"
@@ -134,6 +137,7 @@ def convert_otel_export(rows: list[dict], names: Names) -> Conversion:
                 "event_id": names.token("id", span["spanId"]) if span.get("spanId") else None,
                 "parent": names.token("id", span["parentSpanId"]) if span.get("parentSpanId") else None,
                 "latency_ms": (end - start) / 1e6 if end > start else 0.0,
+                "_source": where,
             }
             if kind == "llm":
                 trigger = " + ".join(sorted(trigger_parts)) or "user_prompt"

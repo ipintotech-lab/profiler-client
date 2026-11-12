@@ -5,6 +5,7 @@ sent anywhere.
     profiler-client prepare ~/.codex/sessions/2026/10/18/rollout-*.jsonl -o analysis-ready
     profiler-client inspect analysis-ready
     profiler-client validate analysis-ready
+    profiler-client show-event report.json h:<event id>
 """
 from __future__ import annotations
 
@@ -20,8 +21,9 @@ from . import __version__, policy
 from .contract import CONTRACT_VERSION
 from .dataset import EVENTS, PrepareError, prepare, read_sealed, summary, validate
 from .names import Names
-from .pseudonym import Pseudonymizer, load_or_create_key, new_key
+from .pseudonym import TOKEN, Pseudonymizer, load_or_create_key, new_key
 from .report import forget_name_lists, read_name_lists, render_html, translate, write_name_list
+from .trace_refs import original_record, read_refs, refs_dir, write_refs
 
 # a decoded report is local and never huge; bound it so a malformed or hostile
 # file fails cleanly instead of exhausting memory or the recursion stack
@@ -36,10 +38,12 @@ def _prepare(args: argparse.Namespace) -> int:
         print(f"  {p}", file=sys.stderr)
     key = load_or_create_key(Path(args.key_file).expanduser()) if args.key_file else new_key()
     names = Names(Pseudonymizer(key), keep=args.keep_names, llm_inputs=args.llm_inputs)
-    manifest = prepare(paths, Path(args.output), names)
-    if not args.no_name_list:
+    refs = None if args.no_name_list else {}
+    manifest = prepare(paths, Path(args.output), names, refs)
+    if refs is not None:
         seal, _ = read_sealed((Path(args.output) / EVENTS).read_bytes())
         write_name_list(seal["payload_sha256"], {**names.seen, **names.field_values()})
+        write_refs(seal["payload_sha256"], refs)
     print(f"wrote {manifest['events']} events from {manifest['sessions']} session(s) "
           f"({manifest['source_format']}) to {args.output}", file=sys.stderr)
     if manifest["kept_names"]:
@@ -76,8 +80,7 @@ def _dataset_hashes(report: dict) -> list[str]:
     return [one] if isinstance(one, str) else []
 
 
-def _open(args: argparse.Namespace) -> int:
-    source = Path(args.report)
+def _read_report(source: Path) -> dict:
     raw = source.read_bytes()
     if len(raw) > MAX_REPORT_BYTES:
         raise ValueError(f"report is larger than {MAX_REPORT_BYTES} bytes")
@@ -87,6 +90,12 @@ def _open(args: argparse.Namespace) -> int:
         raise ValueError("report is nested too deeply to read") from None
     if not isinstance(report, dict):
         raise TypeError("report JSON must contain an object")
+    return report
+
+
+def _open(args: argparse.Namespace) -> int:
+    source = Path(args.report)
+    report = _read_report(source)
     hashes = _dataset_hashes(report)
     found: set[str] = set()
     missing: set[str] = set()
@@ -122,9 +131,32 @@ def _open(args: argparse.Namespace) -> int:
     return 0
 
 
+def _show_event(args: argparse.Namespace) -> int:
+    if not TOKEN.fullmatch(args.event_id):
+        raise ValueError("an event id looks like h: and 64 hex digits, as in the report")
+    hashes = [d for d in _dataset_hashes(_read_report(Path(args.report))) if HEX64.fullmatch(d)]
+    if not hashes:
+        raise ValueError("this report has no dataset hash (payload_sha256), so its events can't be found")
+    found_refs = [refs for refs in map(read_refs, hashes) if refs is not None]
+    if not found_refs:
+        raise ValueError("this machine has no event references for this report's dataset(s); "
+                         "they are kept by prepare unless --no-name-list was given")
+    for refs in found_refs:
+        if args.event_id in refs["events"]:
+            print(json.dumps(original_record(refs, args.event_id), indent=2, ensure_ascii=False))
+            return 0
+    raise ValueError("that event isn't in the event references of this report's dataset(s)")
+
+
+def _forget_one(payload_sha256: str | None = None, everything: bool = False) -> str:
+    names = forget_name_lists(payload_sha256=payload_sha256, everything=everything)
+    refs = forget_name_lists(refs_dir(), payload_sha256=payload_sha256, everything=everything)
+    return f"removed {names} name list(s) and {refs} event reference file(s)"
+
+
 def _forget(args: argparse.Namespace) -> int:
     if args.all:
-        print(f"removed {forget_name_lists(everything=True)} name list(s)")
+        print(_forget_one(everything=True))
         return 0
     if not args.target:
         raise ValueError("give a report JSON or a dataset hash, or use --all")
@@ -136,7 +168,7 @@ def _forget(args: argparse.Namespace) -> int:
         if not digests:
             raise ValueError("that report has no dataset hash (payload_sha256) to forget")
     for digest in digests:
-        print(f"removed {forget_name_lists(payload_sha256=digest)} name list(s) for dataset {digest[:12]}…")
+        print(f"{_forget_one(digest)} for dataset {digest[:12]}…")
     return 0
 
 
@@ -169,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
                         "report can tell when a model call repeats; the text itself is never sent "
                         "(Claude Code, Codex and chat trajectories)")
     p.add_argument("--no-name-list", action="store_true",
-                   help="don't keep pseudonym-to-name mappings on this machine")
+                   help="don't keep pseudonym-to-name mappings or event references (for show-event) on this machine")
     p.set_defaults(run=_prepare)
 
     v = sub.add_parser("validate", help="check a dataset: hash, privacy lint and contract")
@@ -185,9 +217,14 @@ def main(argv: list[str] | None = None) -> int:
     o.add_argument("-o", "--output", help="HTML output path (default: beside the JSON)")
     o.set_defaults(run=_open)
 
-    fg = sub.add_parser("forget", help="delete the local pseudonym-to-name list(s)")
+    se = sub.add_parser("show-event", help="print an event's original record from your trace file, on this machine")
+    se.add_argument("report", help="downloaded report JSON")
+    se.add_argument("event_id", help="the event id from the report (h:...)")
+    se.set_defaults(run=_show_event)
+
+    fg = sub.add_parser("forget", help="delete the local pseudonym-to-name list(s) and event references")
     fg.add_argument("target", nargs="?", help="a report JSON, or a dataset hash (payload_sha256)")
-    fg.add_argument("--all", action="store_true", help="delete every name list on this machine")
+    fg.add_argument("--all", action="store_true", help="delete every name list and event reference on this machine")
     fg.set_defaults(run=_forget)
 
     sub.add_parser("version", help="print client, contract and policy versions").set_defaults(run=_version)

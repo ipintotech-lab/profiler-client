@@ -32,8 +32,8 @@ def name_list_dir() -> Path:
     return Path(base) / "profiler-client" / "names"
 
 
-def write_name_list(payload_sha256: str, names: dict[str, str], directory: Path | None = None) -> Path:
-    directory = directory or name_list_dir()
+def write_private(directory: Path, payload_sha256: str, data: dict) -> Path:
+    """Write ``<payload_sha256>.json`` in ``directory``, owner-only (0600)."""
     if not re.fullmatch(r"[a-f0-9]{64}", payload_sha256):
         raise ValueError("payload_sha256 must be a lowercase SHA-256 hex digest")
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -42,9 +42,13 @@ def write_name_list(payload_sha256: str, names: dict[str, str], directory: Path 
     if hasattr(os, "fchmod"):
         os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump({"version": NAME_LIST_VERSION, "payload_sha256": payload_sha256, "names": names},
-                  f, ensure_ascii=False, sort_keys=True)
+        json.dump(data, f, ensure_ascii=False, sort_keys=True)
     return path
+
+
+def write_name_list(payload_sha256: str, names: dict[str, str], directory: Path | None = None) -> Path:
+    return write_private(directory or name_list_dir(), payload_sha256,
+                         {"version": NAME_LIST_VERSION, "payload_sha256": payload_sha256, "names": names})
 
 
 def read_name_lists(directory: Path | None = None, payload_sha256: str | None = None) -> dict[str, str]:
