@@ -1,5 +1,6 @@
 """Codex, OpenTelemetry, OpenAI chat and generic event logs: the same
 privacy guarantees as Claude Code transcripts, and ``--keep-names``."""
+import hashlib
 import json
 
 import pytest
@@ -328,3 +329,78 @@ def test_llm_inputs_match_across_runs_with_new_ids_and_never_leak(tmp_path, sour
     assert all(e["input_complete"] and e["input_state"]["input"].startswith("h:") for e in first)
     assert len({e["input_state"]["input"] for e in first}) == len(first)
     assert [e["input_state"] for e in again] == [e["input_state"] for e in first]
+
+
+ALL_FORMATS = {**FORMATS, "claude-code": None}
+
+
+def _prepare_any(tmp_path, source, transcript_file):
+    if source == "claude-code":
+        out = tmp_path / "ready"
+        manifest = prepare([transcript_file], out, Names(Pseudonymizer(new_key())))
+        return out, manifest, [json.loads(line) for line in (out / EVENTS).read_text().splitlines()[1:]]
+    return _prepare(tmp_path, source)
+
+
+@pytest.mark.parametrize("source", ALL_FORMATS)
+def test_every_event_has_its_own_pseudonymous_id(tmp_path, source, transcript_file):
+    out, manifest, events = _prepare_any(tmp_path, source, transcript_file)
+    ids = [e.get("event_id") for e in events]
+    assert all(isinstance(i, str) and i.startswith("h:") for i in ids)
+    assert len(set(ids)) == len(ids)
+    seal, _ = read_sealed((out / EVENTS).read_bytes())
+    assert seal["contract_version"] == manifest["contract_version"] == "2"
+    assert seal["parent_relation"] == manifest["parent_relation"]
+    assert seal["parent_relation"] == ("unspecified" if source == "events" else "invokes")
+
+
+@pytest.mark.parametrize("source", ["claude-code", "codex", "openai-chat"])
+def test_a_tool_calls_parent_is_the_llm_call_that_chose_it(tmp_path, source, transcript_file):
+    _, _, events = _prepare_any(tmp_path, source, transcript_file)
+    by_id = {e["event_id"]: e for e in events}
+    tools = [e for e in events if e["event_type"] == "tool_call"]
+    assert tools
+    for tool in tools:
+        parent = by_id[tool["parent"]]
+        assert parent["event_type"] == "decision"
+        assert parent["run_id"] == tool["run_id"]
+        assert tool["node"] in parent["decision"]["selected"].split("+")
+
+
+def test_otel_ids_are_span_ids_in_the_parents_id_space(tmp_path):
+    rows = _otel_rows()[0]
+    spans = rows["resourceSpans"][0]["scopeSpans"][0]["spans"]
+    spans[2]["parentSpanId"] = "s1"  # the tool span runs inside the LLM span
+    path = tmp_path / "spans.json"
+    path.write_text(json.dumps(rows), encoding="utf-8")
+    prepare([path], tmp_path / "ready", Names(Pseudonymizer(new_key())))
+    events = [json.loads(line) for line in (tmp_path / "ready" / EVENTS).read_text().splitlines()[1:]]
+    llm = next(e for e in events if e["event_type"] == "decision")
+    assert next(e for e in events if e.get("parent") == llm["event_id"])["event_type"] == "tool_call"
+
+
+def test_an_event_log_keeps_its_own_ids_and_parents_as_pseudonyms(tmp_path):
+    rows = _event_rows()
+    rows["events"][0]["id"] = "acme-evt-1"
+    rows["events"][1]["parent"] = "acme-evt-1"
+    path = _write(tmp_path, "events.json", rows, document=True)
+    prepare([path], tmp_path / "ready", Names(Pseudonymizer(new_key())))
+    events = [json.loads(line) for line in (tmp_path / "ready" / EVENTS).read_text().splitlines()[1:]]
+    assert events[1]["parent"] == events[0]["event_id"]
+    assert "acme-evt-1" not in (tmp_path / "ready" / EVENTS).read_text()
+
+
+def test_contract_v1_datasets_are_still_read_and_a_bad_relation_is_refused(tmp_path):
+    out, _, _ = _prepare(tmp_path, "codex")
+    seal_line, body = (out / EVENTS).read_bytes().split(b"\n", 1)
+    seal = json.loads(seal_line)["profiler_client_seal"]
+    v1 = {k: v for k, v in seal.items() if k != "parent_relation"} | {"contract_version": "1"}
+    events = [{k: v for k, v in json.loads(line).items() if k != "event_id"} for line in body.splitlines()]
+    v1_body = b"".join(json.dumps(e, sort_keys=True).encode() + b"\n" for e in events)
+    v1["payload_sha256"] = hashlib.sha256(v1_body).hexdigest()
+    read_sealed(json.dumps({"profiler_client_seal": v1}).encode() + b"\n" + v1_body)
+    bad = {**seal, "parent_relation": "follows"}
+    with pytest.raises(PrepareError, match="SEAL_INVALID"):
+        read_sealed(json.dumps({"profiler_client_seal": bad}).encode() + b"\n" + body)
+    with pytest.raises(PrepareError, match="SEAL_UNSUPPORTED"):
+        read_sealed(json.dumps({"profiler_client_seal": {**seal, "contract_version": "3"}}).encode() + b"\n" + body)

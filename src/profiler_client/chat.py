@@ -1,7 +1,7 @@
 """Convert OpenAI-style chat trajectories -- records of ``{"messages":
 [{"role", "content", "tool_calls", "tool_call_id"}, ...]}``, as logged by
 function-calling agents and datasets such as ``cx-cmu/agent_trajectories``
--- into contract v1 events:
+-- into contract v2 events:
 
 * **LLM call** -- one per ``assistant`` message; ``decision.selected`` is
   the tools it called, or ``respond``. ``usage`` and ``finish_reason`` are
@@ -99,6 +99,7 @@ def _convert(record: dict, names: Names, namer: Namer) -> list[dict]:
             llm = {
                 **common,
                 "event_type": "decision",
+                "event_id": names.token("id", [base, index]),
                 "node": llm_node(trigger),
                 "model": names.model(model),
                 "input_state": {"trigger": trigger, **llm_input},
@@ -122,6 +123,7 @@ def _convert(record: dict, names: Names, namer: Namer) -> list[dict]:
                 call = {
                     **common,
                     "event_type": "tool_call",
+                    "event_id": names.token("id", [base, index, len(nodes)]),
                     "node": node,
                     "parent": names.token("id", [base, index]),
                     "trigger": trigger,

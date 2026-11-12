@@ -1,5 +1,5 @@
 """Convert OpenAI Codex CLI sessions (``~/.codex/sessions/YYYY/MM/DD/
-rollout-*.jsonl``) into contract v1 events, with the same rules as
+rollout-*.jsonl``) into contract v2 events, with the same rules as
 ``claude_code.py``:
 
 * **LLM call** -- the model items between two inputs (a user message or
@@ -215,6 +215,7 @@ def convert_codex_session(rows: list[dict], names: Names) -> Conversion:
             llm = {
                 **common,
                 "event_type": "decision",
+                "event_id": names.token("id", f"{session}:{count}"),
                 "node": llm_node(trigger),
                 "model": names.model(model),
                 "input_state": {"trigger": trigger, **llm_input},
@@ -237,6 +238,7 @@ def convert_codex_session(rows: list[dict], names: Names) -> Conversion:
         call = {
             **common,
             "event_type": "tool_call",
+            "event_id": names.token("id", ["tool", session, payload.get("call_id") or len(events)]),
             "node": node,
             "parent": names.token("id", llm["_id"]),
             "trigger": llm["trigger"],

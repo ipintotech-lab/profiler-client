@@ -1,12 +1,12 @@
 """Convert your own agent's event log -- one event per record, in the
-profiler's event shape -- into pseudonymized contract v1 events. Field
+profiler's event shape -- into pseudonymized contract v2 events. Field
 names may use the same aliases the profiler server accepts (``traceId``,
 ``spanId``, ``duration_ms``, ``prompt_tokens``, ``tool_name``, ...), and
 the records may be wrapped (``{"events": [...]}``).
 
 Every record needs a trace, run, workflow, event type and node. Then:
 
-* **Ids** (trace, run, parent) are pseudonyms.
+* **Ids** (trace, run, the event's own id, parent) are pseudonyms.
 * **Names** -- workflow, agent, node, tool, event type, decision type and
   selection, trigger -- are pseudonyms unless ``--keep-names``.
   ``llm``/``llm_call``/``chat``/``completion`` events become ``decision``
@@ -32,6 +32,7 @@ _ALIASES: dict[str, tuple[str, ...]] = {
     "agent": ("agent", "agent_name", "agentName"),
     "event_type": ("event_type", "eventType", "type", "kind"),
     "node": ("node", "name", "span_name", "spanName"),
+    "event_id": ("event_id", "eventId", "id", "spanId", "span_id"),
     "parent": ("parent", "parentSpanId", "parent_span_id", "parent_run_id"),
     "model": ("model", "model_name", "modelName"),
     "latency_ms": ("latency_ms", "duration_ms", "durationMs"),
@@ -104,6 +105,8 @@ def _convert(raw: dict, names: Names) -> dict:
     }
     if _get(raw, "agent") is not None:
         event["agent"] = names.step(str(_get(raw, "agent")))
+    if _get(raw, "event_id") is not None:
+        event["event_id"] = names.token("id", _get(raw, "event_id"))
     if _get(raw, "parent") is not None:
         event["parent"] = names.token("id", _get(raw, "parent"))
     if _get(raw, "model") is not None:
