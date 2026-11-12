@@ -158,14 +158,19 @@ def view(report: dict) -> dict:
         "graph": {
             "run_count": graph.get("run_count"),
             "nodes": [_pick(n, ("id", "kind", "occurrences", "cost")) for n in _list(graph.get("nodes"))],
-            "edges": [_pick(e, ("from", "to", "kind", "transition_count", "distinct_run_count")) for e in _list(graph.get("edges"))],
+            "edges": [{**_pick(e, ("from", "to", "kind", "transition_count", "distinct_run_count")),
+                       # only the event ids, for show-event: a pseudonym never restored, nothing of the call
+                       "evidence_sample": [{"event_id": x["event_id"]} for x in _list(e.get("evidence_sample"))
+                                           if isinstance(x, dict) and TOKEN.fullmatch(str(x.get("event_id")))]}
+                      for e in _list(graph.get("edges"))],
         } if isinstance(graph, dict) else None,
         "data_quality": {"gaps": [_pick(g, ("key", "label", "effect"))
                                   for g in _list(_pick(report.get("data_quality"), ("gaps",)).get("gaps"))]},
     }
 
 
-def render_html(report: dict, title: str, restored: int | None = None, unmatched: int | None = None) -> str:
+def render_html(report: dict, title: str, restored: int | None = None, unmatched: int | None = None,
+                source: str | None = None) -> str:
     # be honest in the header about how much was restored: with nothing matched,
     # don't claim "your own names" -- the page is still pseudonymized
     if restored:
@@ -192,7 +197,7 @@ def render_html(report: dict, title: str, restored: int | None = None, unmatched
 <body><main>
 <article class="sheet" id="report"><noscript>This report is drawn by a script in this file. Allow scripts for this local page to see it.</noscript></article>
 </main>
-<script type="application/json" id="report-data">{_script_json({"report": view(report), "name": title, "meta": meta})}</script>
+<script type="application/json" id="report-data">{_script_json({"report": view(report), "name": title, "meta": meta, "source": source})}</script>
 <script>
 {js}
 </script>
@@ -200,7 +205,7 @@ def render_html(report: dict, title: str, restored: int | None = None, unmatched
 (function () {{
   const page = JSON.parse(document.getElementById('report-data').textContent);
   const root = document.getElementById('report');
-  ProfilerReport.render(root, page.report, {{ name: page.name, meta: page.meta }});
+  ProfilerReport.render(root, page.report, {{ name: page.name, meta: page.meta, showEvent: page.source }});
   const print = document.createElement('button');
   print.className = 'btn';
   print.type = 'button';
