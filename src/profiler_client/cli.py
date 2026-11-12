@@ -120,7 +120,8 @@ def _open(args: argparse.Namespace) -> int:
     if hasattr(os, "fchmod"):
         os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(render_html(report, title, restored=len(found), unmatched=len(missing)))
+        f.write(render_html(report, title, restored=len(found), unmatched=len(missing),
+                            source=str(source.resolve())))
     # say plainly what was and wasn't restored, so a half-restored report isn't mistaken for a full one
     if not hashes:
         print("this report has no dataset hash (payload_sha256), so names were not restored")

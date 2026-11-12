@@ -410,3 +410,18 @@ def test_a_different_tool_output_changes_every_later_llm_input(transcript_rows):
     first, other = _llm_inputs(transcript_rows), _llm_inputs(changed)
     assert first[0]["input_state"] == other[0]["input_state"]  # read before the output
     assert all(a["input_state"] != b["input_state"] for a, b in zip(first[1:], other[1:]))
+
+
+def test_open_keeps_only_the_event_ids_a_map_step_can_look_up(tmp_path, monkeypatch):
+    # show-event needs the ids; the run ids and anything that isn't an event id stay out of the page
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    event_id, run_id = "h:" + "4" * 64, "h:" + "5" * 64
+    sample = [{"event_id": event_id, "run_id": run_id}, {"event_id": "not an id <b>"}]
+    source = tmp_path / "it's a report.json"
+    source.write_text(json.dumps({"graph": {"run_count": 1, "nodes": [], "edges": [
+        {"from": "@prompt", "to": "step", "kind": "starts", "transition_count": 1, "evidence_sample": sample}]}}))
+    output = tmp_path / "report.html"
+    assert cli.main(["open", str(source), "-o", str(output)]) == 0
+    rendered = output.read_text()
+    assert event_id in rendered and str(source.resolve()) in rendered
+    assert run_id not in rendered and "not an id" not in rendered

@@ -148,7 +148,7 @@ function renderMap(q, data) {
     if (MAP_END[n.id]) return `<g class="node end"><rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="22"/><text x="${b.cx}" y="${b.cy + 5}" text-anchor="middle">${MAP_END[n.id]}</text></g>`;
     const [t, s1, s2] = lines(n), loop = loops.get(n.id);
     const cls = `node${n.kind === 'llm_call' ? ' llm' : ''}${hot && n.id === hot.id ? ' hot' : ''}`;
-    return `<g class="${cls}"><title>${esc(n.id)}</title><rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="6"/>` +
+    return `<g class="${cls}" data-node="${esc(n.id)}"><title>${esc(n.id)}</title><rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="6"/>` +
       `<text class="t" x="${b.x + 14}" y="${b.y + 26}">${esc(t)}</text>` +
       (s1 ? `<text class="s" x="${b.x + 14}" y="${b.y + 44}">${esc(s1)}</text>` : '') +
       `<text class="s" x="${b.x + 14}" y="${b.y + (s1 ? 59 : 50)}">${esc(s2)}${loop ? ` · ↻ ${esc(count(loop))}` : ''}</text></g>`;
@@ -267,6 +267,7 @@ const SHEET = `
     <h3>How your workflow runs</h3>
     <div class="mapbox" data-r="map"></div>
     <p class="why" data-r="mapWhy"></p>
+    <div class="events" data-r="events" hidden></div>
   </section>
   <section>
     <h3>Where the money went</h3>
@@ -283,7 +284,46 @@ const SHEET = `
   </section>
   <p class="notes" data-r="notes"></p>`;
 
-function render(root, data, { name = '', meta = [] } = {}) {
+// With `showEvent` (the report's path on this machine), a map step lists a few of its calls, each with the
+// profiler-client command that prints its original record. The page runs nothing itself.
+const shellQuote = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
+
+function wireEvents(q, data, reportPath) {
+  const examples = new Map();
+  for (const e of data.graph?.edges || []) {
+    const ids = examples.get(e.to) || new Set();
+    for (const x of e.evidence_sample || []) if (ids.size < 5) ids.add(x.event_id);
+    examples.set(e.to, ids);
+  }
+  const panel = q('events');
+  const show = g => {
+    const id = g.dataset.node, ids = [...examples.get(id)];
+    panel.innerHTML = `<p><b>${stepName(id)}</b>: ${plural(ids.length, 'example call')}. On this machine, each command prints the call's original record from your trace file.</p>` +
+      `<ul>${ids.map(x => `<li><code>profiler-client show-event ${esc(shellQuote(reportPath))} ${esc(x)}</code> <button type="button" class="link" data-copy>Copy</button></li>`).join('')}</ul>`;
+    panel.hidden = false;
+  };
+  for (const g of q('map').querySelectorAll('g[data-node]')) {
+    if (!examples.get(g.dataset.node)?.size) continue;
+    g.classList.add('pick');
+    g.setAttribute('tabindex', '0');
+    g.setAttribute('role', 'button');
+    g.setAttribute('aria-label', `Example calls of ${g.dataset.node}`);
+    g.addEventListener('click', () => show(g));
+    g.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); show(g); } });
+  }
+  if (!q('map').querySelector('g.pick')) return;
+  q('map').querySelector('.legend')?.insertAdjacentHTML('beforeend', '<span>Click a step to look up example calls</span>');
+  panel.addEventListener('click', e => {
+    const b = e.target.closest('button[data-copy]');
+    if (!b) return;
+    const code = b.previousElementSibling;
+    // the clipboard can be refused on a local file: then select the command for the user to copy
+    navigator.clipboard?.writeText(code.textContent).then(() => { b.textContent = 'Copied'; },
+      () => getSelection().selectAllChildren(code)) ?? getSelection().selectAllChildren(code);
+  });
+}
+
+function render(root, data, { name = '', meta = [], showEvent = null } = {}) {
   root.innerHTML = SHEET;
   const q = k => root.querySelector(`[data-r="${k}"]`);
   const sm = data.summary || {}, t = sm.totals || {}, g = data.grade;
@@ -292,6 +332,7 @@ function render(root, data, { name = '', meta = [] } = {}) {
   q('grade').hidden = !g;
   if (g) { q('grade').dataset.g = g.grade; q('gradeLetter').textContent = g.grade; q('grade').setAttribute('aria-label', `Dataset grade ${g.grade}`); }
   renderMap(q, data);
+  if (showEvent) wireEvents(q, data, showEvent);
   q('totals').innerHTML = `${money(t.cost)} <span class="k">across</span> ${plural(t.runs, 'run')}<span class="k">,</span> ` +
     `${plural(t.llm_calls, 'LLM call')} <span class="k">and</span> ${plural(t.tool_calls, 'tool call')}<span class="k">,</span> ${count(t.tokens)} tokens.`;
 
