@@ -1,6 +1,6 @@
 """Convert OpenTelemetry OTLP JSON trace exports (``{"resourceSpans": ...}``,
 one document or one export request per line, as the collector's file
-exporter writes) into contract v1 events.
+exporter writes) into contract v2 events.
 
 Spans are read with the OpenTelemetry GenAI conventions (``gen_ai.*``)
 and OpenInference's (``openinference.span.kind``, ``llm.*``, ``tool.*``),
@@ -131,6 +131,7 @@ def convert_otel_export(rows: list[dict], names: Names) -> Conversion:
                 "run_id": names.token("id", trace_id),
                 "workflow": names.step(str(workflow)),
                 "agent": names.step(str(agent)) if agent else None,
+                "event_id": names.token("id", span["spanId"]) if span.get("spanId") else None,
                 "parent": names.token("id", span["parentSpanId"]) if span.get("parentSpanId") else None,
                 "latency_ms": (end - start) / 1e6 if end > start else 0.0,
             }

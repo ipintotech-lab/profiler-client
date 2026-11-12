@@ -1,5 +1,5 @@
 """Convert Claude Code session transcripts (``~/.claude/projects/<project>/
-<sessionId>.jsonl``) into contract v1 events, pseudonymized as they are
+<sessionId>.jsonl``) into contract v2 events, pseudonymized as they are
 built. Adapted from the profiler server's converter; what changes is what
 leaves the machine:
 
@@ -272,6 +272,7 @@ def convert_claude_code_transcript(rows: list[dict], names: Names) -> Conversion
             call = {
                 **common,
                 "event_type": "decision",
+                "event_id": ps.token("id", message_id),
                 "node": llm_node(trigger),
                 "model": names.model(raw_model),
                 "input_state": {"trigger": trigger, **llm_input},
@@ -304,6 +305,7 @@ def convert_claude_code_transcript(rows: list[dict], names: Names) -> Conversion
             tool_calls[tool_id] = {
                 **common,
                 "event_type": "tool_call",
+                "event_id": ps.token("id", ["tool", tool_id if tool_id else [message_id, len(call["_tools"])]]),
                 "node": node,
                 "parent": ps.token("id", message_id),
                 # a tool call starts from whatever the LLM call that chose it reacted to

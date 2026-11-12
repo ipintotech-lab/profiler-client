@@ -1,11 +1,17 @@
-"""Event contract v1: the only shape this client writes and the profiler
+"""Event contract v2: the only shape this client writes and the profiler
 server reads. It matches the server's ``TraceEvent`` field for field, so
 a prepared dataset is accepted by today's ``/analyze`` unchanged."""
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-CONTRACT_VERSION = "1"
+CONTRACT_VERSION = "2"
+# v1 datasets (no ``event_id``) are still read, so older clients keep working.
+READABLE_CONTRACTS = frozenset({"1", "2"})
+# What an event's ``parent`` means, per source format. "invokes": the parent
+# is the event that started this one (the LLM call that chose a tool, or the
+# enclosing span). "unspecified": the user's own log, whose meaning we can't know.
+PARENT_RELATIONS = frozenset({"invokes", "unspecified", "mixed"})
 
 
 class _Strict(BaseModel):
@@ -34,6 +40,8 @@ class TraceEvent(_Strict):
     agent: str | None = None
     event_type: str
     node: str
+    # the event's own id (v2), in the same id space as ``parent``
+    event_id: str | None = None
     parent: str | None = None
     input_state: dict = Field(default_factory=dict)
     decision: Decision | None = None

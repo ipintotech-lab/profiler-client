@@ -56,7 +56,7 @@ def check_event(event: dict, kept: frozenset[str] = frozenset()) -> list[str]:
     for key, value in event.items():
         if value is None:
             continue
-        if key in ("trace_id", "run_id", "parent"):
+        if key in ("trace_id", "run_id", "event_id", "parent"):
             _check_string(key, value, isinstance(value, str) and bool(_TOKEN_RE.match(value)), problems)
         elif key == "workflow":
             _check_string(key, value, _is_workflow(value, kept), problems)

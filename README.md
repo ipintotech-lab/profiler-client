@@ -78,7 +78,7 @@ dataset. The lint accepts no other names.
 | Kept in clear text | Pseudonymized | Dropped |
 | --- | --- | --- |
 | Claude Code's and Codex's built-in tool names | project directory | prompts and replies |
-| well-known programs and sub-commands (`git status`) | session, prompt, message, trace and span ids | tool output text |
+| well-known programs and sub-commands (`git status`) | session, prompt, message, tool call, trace and span ids | tool output text |
 | file types (`.py`) | MCP and custom tool names, your workflow and agent names (unless `--keep-names`) | your request text |
 | `claude-*`, `gpt-*` and `o`-series model ids, Claude Code and Codex versions | script names, other programs and sub-commands | timestamps (durations are kept) |
 | token counts, latency, cost, stop reasons | every tool input and every tool output | working directories |
@@ -119,9 +119,17 @@ the manifest, otherwise nothing is written and the error names the field, never 
 again, and also checks that `events.jsonl` still matches the hash in the
 manifest.
 
+Each event has its own id (`event_id`, a pseudonym of the message, tool call
+or span id) in the same id space as its `parent`, so the profiler can draw
+which step started which. A tool call's parent is the LLM call that chose it,
+or its enclosing span in OpenTelemetry (`parent_relation: invokes`). For your
+own event log the client can't know what `parent` means, so it says
+`unspecified`.
+
 The first line of `events.jsonl` is a seal: the client, contract and policy
-versions, the event count, the kept names and the SHA-256 of the events after
-it. The profiler server refuses a file without a matching seal, then runs this
+versions, what `parent` means, the event count, the kept names and the
+SHA-256 of the events after it. Datasets from clients before v0.7.0
+(contract v1, no `event_id`) are still accepted. The profiler server refuses a file without a matching seal, then runs this
 same privacy lint and contract check on every event. The seal is a checksum,
 not a signature, so the server's own lint is what decides.
 

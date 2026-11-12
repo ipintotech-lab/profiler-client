@@ -1,10 +1,10 @@
 """Read trace files and write / check an ``analysis-ready`` directory:
 
-* ``events.jsonl`` -- a seal line, then contract v1 events, one per line
+* ``events.jsonl`` -- a seal line, then contract v2 events, one per line
 * ``manifest.json`` -- versions, counts and the SHA-256 of ``events.jsonl``
 
 The seal (``{"profiler_client_seal": {...}}``) records the client, contract
-and policy versions, the event count, the kept names and the SHA-256 of
+and policy versions, what ``parent`` means (``parent_relation``), the event count, the kept names and the SHA-256 of
 the event lines after it, so ``events.jsonl`` can be checked on its own:
 the profiler server reads only that file, refuses it without a seal that
 matches, and runs ``read_sealed`` -- this same lint -- on every event. The
@@ -31,7 +31,7 @@ from . import __version__, policy
 from .chat import convert_chat_trajectories, is_chat_trajectory
 from .claude_code import convert_claude_code_transcript, is_claude_code_transcript
 from .codex import convert_codex_session, is_codex_session
-from .contract import CONTRACT_VERSION, TraceEvent
+from .contract import CONTRACT_VERSION, PARENT_RELATIONS, READABLE_CONTRACTS, TraceEvent
 from .events import convert_event_log, is_event_log
 from .lint import check_event
 from .names import KEEPABLE, Names
@@ -46,6 +46,12 @@ EVENTS = "events.jsonl"
 MANIFEST = "manifest.json"
 SEAL = "profiler_client_seal"
 
+
+# What ``parent`` means in each format: see ``contract.PARENT_RELATIONS``.
+# A tool call's parent is the LLM call that chose it (Claude Code, Codex,
+# chat) or its enclosing span (OTel). An event log's is whatever its author meant.
+PARENT_RELATION = {"claude-code": "invokes", "codex": "invokes", "otel": "invokes", "openai-chat": "invokes",
+                   "events": "unspecified"}
 
 # Checked in order: the generic event log last, since it accepts the most.
 FORMATS = (
@@ -110,7 +116,8 @@ def _check(events: list, kept: frozenset[str]) -> None:
             TraceEvent.model_validate(event)
         except ValidationError as exc:
             fields = sorted({".".join(str(p) for p in e["loc"]) for e in exc.errors()})
-            raise PrepareError("CONTRACT_INVALID", f"event {number} breaks contract v1 in: {', '.join(fields)}") from None
+            raise PrepareError("CONTRACT_INVALID", f"event {number} breaks the event contract in: "
+                                                   f"{', '.join(fields)}") from None
 
 
 def detect(rows: list) -> str | None:
@@ -124,7 +131,7 @@ def prepare(paths: list[Path], out_dir: Path, names: Names) -> dict:
     sessions = sessions_without_cost = 0
     formats: set[str] = set()
     converters = {name: convert for name, _, convert in FORMATS}
-    for path in paths:
+    for file_index, path in enumerate(paths):
         rows = read_records(path)
         source = detect(rows)
         if source is None:
@@ -133,6 +140,10 @@ def prepare(paths: list[Path], out_dir: Path, names: Names) -> dict:
         conversion = converters[source](rows, names)
         if not conversion.events:
             raise PrepareError("NO_EVENTS", f"{path} ({source}) has no LLM or tool calls to prepare")
+        for index, event in enumerate(conversion.events):
+            if not event.get("event_id"):
+                # the source had no id for it: one from its place in the input
+                event["event_id"] = names.token("id", ["event", file_index, index])
         formats.add(source)
         events.extend(conversion.events)
         sessions += conversion.sessions
@@ -140,12 +151,15 @@ def prepare(paths: list[Path], out_dir: Path, names: Names) -> dict:
     kept = frozenset(names.kept)
     _check(events, kept)
 
-    payload = sealed_payload(events, kept, names.ps.key_id())
+    relations = {PARENT_RELATION[f] for f in formats}
+    relation = relations.pop() if len(relations) == 1 else "mixed"
+    payload = sealed_payload(events, kept, names.ps.key_id(), relation)
     manifest = {
         "dataset_id": secrets.token_hex(16),
         "client_version": __version__,
         "contract_version": CONTRACT_VERSION,
         "policy_version": policy.POLICY_VERSION,
+        "parent_relation": relation,
         "source_format": "+".join(sorted(formats)),
         "files": len(paths),
         "sessions": sessions,
@@ -162,7 +176,8 @@ def prepare(paths: list[Path], out_dir: Path, names: Names) -> dict:
     return manifest
 
 
-def sealed_payload(events: list[dict], kept: frozenset[str], key_id: str | None = None) -> bytes:
+def sealed_payload(events: list[dict], kept: frozenset[str], key_id: str | None = None,
+                   parent_relation: str = "unspecified") -> bytes:
     """``events.jsonl``'s bytes: the seal line, then one event per line.
     ``key_id`` (``Pseudonymizer.key_id``) says which datasets share a key."""
     body = "".join(json.dumps(e, ensure_ascii=False, sort_keys=True) + "\n" for e in events).encode()
@@ -170,6 +185,7 @@ def sealed_payload(events: list[dict], kept: frozenset[str], key_id: str | None 
         "client_version": __version__,
         "contract_version": CONTRACT_VERSION,
         "policy_version": policy.POLICY_VERSION,
+        "parent_relation": parent_relation,
         "events": len(events),
         "kept_names": sorted(kept),
         "payload_sha256": hashlib.sha256(body).hexdigest(),
@@ -182,7 +198,8 @@ def sealed_payload(events: list[dict], kept: frozenset[str], key_id: str | None 
 def read_sealed(payload: bytes) -> tuple[dict, list[dict]]:
     """Check ``events.jsonl``'s bytes on their own: a seal first, the
     events after it match its hash and count, and every event passes the
-    lint (with the seal's kept names) and the contract."""
+    lint (with the seal's kept names) and the contract. Contract v1
+    datasets (no ``event_id``, no ``parent_relation``) are still accepted."""
     first, _, body = payload.partition(b"\n")
     try:
         record = json.loads(first)
@@ -192,9 +209,13 @@ def read_sealed(payload: bytes) -> tuple[dict, list[dict]]:
     if not isinstance(seal, dict):
         raise PrepareError("SEAL_MISSING", f"{EVENTS} doesn't start with a profiler-client seal; "
                                            "prepare it with profiler-client")
-    if seal.get("contract_version") != CONTRACT_VERSION:
-        raise PrepareError("SEAL_UNSUPPORTED", f"the dataset isn't contract v{CONTRACT_VERSION}; prepare it "
-                                               "with a matching profiler-client")
+    if seal.get("contract_version") not in READABLE_CONTRACTS:
+        raise PrepareError("SEAL_UNSUPPORTED", "the dataset's contract version isn't one this client reads ("
+                                               + ", ".join(f"v{v}" for v in sorted(READABLE_CONTRACTS))
+                                               + "); prepare it with a matching profiler-client")
+    if seal["contract_version"] != "1" and seal.get("parent_relation") not in PARENT_RELATIONS:
+        raise PrepareError("SEAL_INVALID", "parent_relation must be one of "
+                                           + ", ".join(sorted(PARENT_RELATIONS)))
     if hashlib.sha256(body).hexdigest() != seal.get("payload_sha256"):
         raise PrepareError("PAYLOAD_CHANGED", "the events no longer match the seal; run prepare again")
     try:
