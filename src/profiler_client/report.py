@@ -123,6 +123,48 @@ def _script_json(value: Any) -> str:
             .replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"))
 
 
+def _pick(value: Any, keys: tuple[str, ...]) -> dict:
+    return {k: value[k] for k in keys if k in value} if isinstance(value, dict) else {}
+
+
+def _list(value: Any) -> list:
+    return value if isinstance(value, list) else []
+
+
+def view(report: dict) -> dict:
+    """Only the fields report.js draws. The page holds restored names, and a finding's
+    matched inputs (``inputs``, ``groups``) are never drawn, so they are never written."""
+    summary = _pick(report.get("summary"), ("totals", "notes"))
+    summary["opportunities"] = [
+        {**_pick(o, ("type", "nodes", "title", "saving", "observations", "action")),
+         "identity": _pick(o.get("identity"), ("agent",))}
+        for o in _list(_pick(report.get("summary"), ("opportunities",)).get("opportunities")) if isinstance(o, dict)]
+    evidence = ("occurrences", "unique_inputs", "repeated_inputs", "repeated_observations", "determinism_confidence")
+    by_agent = _pick(report.get("mine"), ("by_agent",)).get("by_agent")
+    mine = {"by_agent": {agent: {"actions": [
+        {**_pick(a, ("node", "occurrences", "total_cost", "classification")), "evidence": _pick(a.get("evidence"), evidence)}
+        for a in _list(_pick(by, ("actions",)).get("actions")) if isinstance(a, dict)]}
+        for agent, by in (by_agent.items() if isinstance(by_agent, dict) else ())}}
+    observe = _pick(report.get("observe"), ("selected_workflow",))
+    observe["workflows"] = [_pick(w, ("name", "num_runs")) for w in _list(_pick(report.get("observe"), ("workflows",)).get("workflows"))]
+    graph = report.get("graph")
+    return {
+        "mode": report.get("mode"),
+        "summary": summary,
+        "mine": mine,
+        "observe": observe,
+        "grade": _pick(report.get("grade"), ("grade", "word")) or None,
+        "availability": {"graph": _pick(_pick(report.get("availability"), ("graph",)).get("graph"), ("available", "code")) or None},
+        "graph": {
+            "run_count": graph.get("run_count"),
+            "nodes": [_pick(n, ("id", "kind", "occurrences", "cost")) for n in _list(graph.get("nodes"))],
+            "edges": [_pick(e, ("from", "to", "kind", "transition_count", "distinct_run_count")) for e in _list(graph.get("edges"))],
+        } if isinstance(graph, dict) else None,
+        "data_quality": {"gaps": [_pick(g, ("key", "label", "effect"))
+                                  for g in _list(_pick(report.get("data_quality"), ("gaps",)).get("gaps"))]},
+    }
+
+
 def render_html(report: dict, title: str, restored: int | None = None, unmatched: int | None = None) -> str:
     # be honest in the header about how much was restored: with nothing matched,
     # don't claim "your own names" -- the page is still pseudonymized
@@ -150,7 +192,7 @@ def render_html(report: dict, title: str, restored: int | None = None, unmatched
 <body><main>
 <article class="sheet" id="report"><noscript>This report is drawn by a script in this file. Allow scripts for this local page to see it.</noscript></article>
 </main>
-<script type="application/json" id="report-data">{_script_json({"report": report, "name": title, "meta": meta})}</script>
+<script type="application/json" id="report-data">{_script_json({"report": view(report), "name": title, "meta": meta})}</script>
 <script>
 {js}
 </script>

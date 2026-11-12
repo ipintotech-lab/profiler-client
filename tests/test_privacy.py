@@ -217,6 +217,29 @@ def test_open_draws_the_report_with_the_shared_renderer(tmp_path, monkeypatch):
     assert rendered.count("</script>") == 3  # the data, the renderer and the call: nothing from the report
 
 
+def test_open_never_writes_a_findings_restored_inputs(tmp_path, monkeypatch):
+    # a finding lists the inputs it matched; their pseudonyms are in the name list
+    # (short event-log field values), but the page draws no input, so none is written
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    payload_hash, value_token, node_token = "b" * 64, "h:" + "3" * 64, "h:" + "2" * 64
+    write_name_list(payload_hash, {value_token: "private-input", node_token: "calculate-total"},
+                    tmp_path / "profiler-client" / "names")
+    action = {"node": node_token, "occurrences": 2, "total_cost": 1, "classification": "INSUFFICIENT_EVIDENCE",
+              "evidence": {"occurrences": 2, "inputs": [{"input": {"query": value_token}}]}}
+    source = tmp_path / "report.json"
+    source.write_text(json.dumps({
+        "payload_sha256": payload_hash,
+        "summary": {"totals": {"cost": 1}, "opportunities": [
+            {"type": "CACHE_RESULT", "nodes": [node_token], "groups": [{"input": {"query": value_token}}]}]},
+        "mine": {"by_agent": {"agent": {"actions": [action]}}},
+    }))
+    output = tmp_path / "report.html"
+    assert cli.main(["open", str(source), "-o", str(output)]) == 0
+    rendered = output.read_text()
+    assert "calculate-total" in rendered
+    assert "private-input" not in rendered and value_token not in rendered
+
+
 def test_open_refuses_an_oversized_or_too_deeply_nested_report(tmp_path):
     big = tmp_path / "big.json"
     big.write_bytes(b'{"x":"' + b"a" * (64 * 1024 * 1024 + 1) + b'"}')
