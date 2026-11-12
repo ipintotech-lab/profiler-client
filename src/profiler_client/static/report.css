@@ -1,0 +1,124 @@
+/* The AI Agent Profiler report, drawn by report.js into an element with class "sheet".
+   Everything is scoped to .sheet, so a host page keeps its own styles. */
+.sheet {
+  --paper: #f4f5f8;
+  --sheet: #ffffff;
+  --ink: #1d2033;
+  --ink-2: #4a4e66;
+  --rule: #d7d9e3;
+  --carbon: #3a3e9e;
+  --carbon-deep: #2b2e7a;
+  --pseudo: #e3e4f6;
+  --estimate: #8a5a00;
+  --estimate-bg: #f8edd3;
+  --bad: #a1262d;
+  --bad-bg: #f9e3e4;
+  --sans: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --mono: "Spline Sans Mono", ui-monospace, Menlo, Consolas, monospace;
+  color: var(--ink); font-family: var(--sans); font-size: 16px; line-height: 1.55;
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; padding: 28px 32px 32px;
+}
+.sheet *, .sheet *::before, .sheet *::after { box-sizing: border-box; }
+.sheet h2, .sheet h3, .sheet p, .sheet ul, .sheet dl, .sheet dd { margin: 0; padding: 0; }
+.sheet h2 { font-size: 21px; font-weight: 700; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.sheet h3 { font-size: 17px; font-weight: 700; }
+.sheet code { font-family: var(--mono); font-size: 14px; }
+.sheet [hidden] { display: none !important; }
+.sheet .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.sheet .link { background: none; border: 0; color: var(--carbon); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.sheet :focus-visible { outline: 3px solid var(--carbon); outline-offset: 2px; border-radius: 2px; }
+@media (max-width: 600px) { .sheet { padding: 20px 16px 24px; } }
+
+.sheet .sheet-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.sheet .sheet-head .title { display: flex; gap: 14px; align-items: center; min-width: 0; }
+.sheet .sheet-head .when { font-size: 14px; color: var(--ink-2); }
+.sheet .tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.sheet .grade { border-radius: 6px; display: grid; place-items: center; width: 44px; height: 44px; background: var(--pseudo); color: var(--carbon-deep); }
+.sheet .grade b { font-size: 24px; line-height: 1; font-weight: 800; letter-spacing: -.03em; }
+.sheet .grade[data-g="C"] { background: var(--estimate-bg); color: var(--estimate); }
+.sheet .grade[data-g="D"] { background: var(--bad-bg); color: var(--bad); }
+.sheet .totals { font-size: 22px; line-height: 1.35; font-weight: 600; letter-spacing: -.01em; margin-top: 18px; max-width: 46ch; }
+.sheet .totals .k { color: var(--ink-2); font-weight: 400; }
+.sheet section { margin-top: 32px; }
+.sheet p.why { color: var(--ink-2); max-width: 70ch; margin-top: 4px; font-size: 15px; }
+.sheet .scope { font-size: 15px; color: var(--ink-2); margin-top: 6px; max-width: 70ch; }
+
+.sheet section.says { margin-top: 24px; padding: 16px 20px; border-left: 4px solid var(--carbon); background: var(--paper); border-radius: 0 6px 6px 0; }
+.sheet .says ul { margin: 8px 0 0; padding-left: 20px; font-size: 17px; line-height: 1.45; max-width: 70ch; }
+.sheet .says li + li { margin-top: 6px; }
+.sheet .says b { font-weight: 700; }
+
+/* the workflow map */
+.sheet section.map { margin-top: 24px; break-inside: avoid; }
+.sheet .mapbox { margin-top: 12px; --edge: #7d81a8; }
+.sheet .mapscroll { overflow-x: auto; }
+.sheet .mapbox svg { display: block; width: 100%; height: auto; font-family: var(--sans); }
+.sheet .mapbox .node rect { fill: var(--sheet); stroke: var(--rule); stroke-width: 1.5; }
+.sheet .mapbox .node.llm rect { fill: var(--pseudo); stroke: var(--carbon); }
+.sheet .mapbox .node.hot rect { fill: var(--estimate-bg); stroke: var(--estimate); stroke-width: 2.5; }
+.sheet .mapbox .node .t { fill: var(--ink); font-size: 14px; font-weight: 600; }
+.sheet .mapbox .node .s { fill: var(--ink-2); font-size: 12px; font-family: var(--mono); }
+.sheet .mapbox .node.end rect { fill: var(--paper); stroke: var(--ink-2); stroke-dasharray: 4 3; }
+.sheet .mapbox .node.end text { fill: var(--ink-2); font-size: 13px; font-weight: 600; }
+.sheet .mapbox .edge { fill: none; stroke: var(--edge); stroke-linecap: round; }
+.sheet .mapbox .edge.hot { stroke: var(--estimate); }
+.sheet .mapbox .edge-n { fill: var(--ink); font-size: 12px; font-family: var(--mono); font-variant-numeric: tabular-nums; paint-order: stroke; stroke: var(--sheet); stroke-width: 5px; stroke-linejoin: round; }
+.sheet .mapbox .arrow { fill: var(--edge); }
+.sheet .mapbox .arrow.hot { fill: var(--estimate); }
+.sheet .mapbox .legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 14px; font-size: 14px; color: var(--ink-2); }
+.sheet .mapbox .sw { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 6px; border: 1.5px solid; }
+.sheet .mapbox .sw.llm { background: var(--pseudo); border-color: var(--carbon); }
+.sheet .mapbox .sw.tool { background: var(--sheet); border-color: var(--rule); }
+.sheet .mapbox .sw.hot { background: var(--estimate-bg); border-color: var(--estimate); }
+.sheet .mapbox .none { color: var(--ink-2); font-size: 15px; max-width: 70ch; }
+.sheet .mapbox .sw, .sheet .mapbox svg { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+/* where the money went */
+.sheet .keys { margin-top: 12px; font-size: 14px; color: var(--ink-2); }
+.sheet .key { display: inline-flex; align-items: center; gap: 6px; margin-right: 16px; }
+.sheet .key b, .sheet .spendbar i { background: var(--carbon); }
+.sheet .key b { width: 14px; height: 10px; border-radius: 2px; display: inline-block; }
+.sheet .key b.rep, .sheet .spendbar i.rep { background: repeating-linear-gradient(135deg, var(--carbon) 0 3px, #8e91d6 3px 6px); }
+.sheet .spendbar { height: 10px; background: var(--pseudo); border-radius: 2px; position: relative; overflow: hidden; margin-top: 7px; }
+.sheet .spendbar i { position: absolute; top: 0; bottom: 0; left: 0; }
+.sheet .key b, .sheet .spendbar, .sheet .spendbar i { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.sheet .tbl { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 15px; }
+.sheet .tbl th { text-align: left; font-weight: 600; color: var(--ink-2); font-size: 14px; border-bottom: 2px solid var(--ink); padding: 6px 12px 6px 0; }
+.sheet .tbl td { border-bottom: 1px solid var(--rule); padding: 10px 12px 10px 0; vertical-align: top; }
+.sheet .tbl td.num, .sheet .tbl th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sheet .tbl td:first-child { width: 30%; }
+.sheet .tbl td.barcell { width: 28%; }
+.sheet .tbl .step { font-family: var(--mono); font-size: 14px; overflow-wrap: break-word; }
+.sheet .tbl .note { display: block; font-size: 13px; color: var(--ink-2); }
+.sheet .tbl .muted { color: var(--ink-2); }
+.sheet .step[title] { cursor: help; }
+.sheet .tbl .h { font-family: var(--mono); font-size: .95em; }
+.sheet .tbl .find + .find { margin-top: 6px; }
+.sheet .tbl tr.has-try td { border-bottom: 0; padding-bottom: 2px; }
+.sheet .tbl tr.try td { padding-top: 0; font-size: 14.5px; }
+.sheet .tbl tr.try td::before { content: none; }
+.sheet .tbl tr.more td { font-size: 14px; color: var(--ink-2); }
+@media (max-width: 700px) {
+  .sheet .tbl thead { display: none; }
+  .sheet .tbl tr { display: block; border-bottom: 1px solid var(--rule); padding: 10px 0; }
+  .sheet .tbl td, .sheet .tbl td:first-child { display: block; width: auto; border: 0; padding: 2px 0; }
+  .sheet .tbl td.num { text-align: left; }
+  .sheet .tbl td[data-label]::before { content: attr(data-label) ": "; color: var(--ink-2); }
+  .sheet .tbl td:first-child::before { content: none; }
+  .sheet .tbl td.barcell, .sheet .tbl th.barh { display: none; }
+  .sheet .tbl tr.has-try { border-bottom: 0; padding-bottom: 0; }
+  .sheet .tbl tr.try { padding-top: 4px; }
+}
+
+.sheet .gaps { margin-top: 10px; }
+.sheet .gaps dt { font-weight: 600; }
+.sheet .gaps dd { color: var(--ink-2); margin-bottom: 10px; max-width: 70ch; }
+.sheet .notes { font-size: 14px; color: var(--ink-2); margin-top: 28px; max-width: 75ch; }
+
+@media print {
+  .sheet { border: 0; padding: 0; margin: 0; }
+  .sheet .tools { display: none !important; }
+  .sheet .tbl tr { break-inside: avoid; }
+  .sheet .tbl tr.has-try { break-after: avoid; }  /* keep a step with its Try lines */
+  .sheet .tbl tr.more { display: none; }
+}

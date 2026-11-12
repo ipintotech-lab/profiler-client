@@ -11,7 +11,7 @@ from profiler_client.dataset import EVENTS, PrepareError, prepare, read_sealed, 
 from profiler_client.lint import check_event
 from profiler_client.names import Names
 from profiler_client.pseudonym import Pseudonymizer, load_or_create_key, new_key
-from profiler_client.report import write_name_list
+from profiler_client.report import STATIC, write_name_list
 
 
 def _events(rows, key=b"k" * 32):
@@ -199,6 +199,22 @@ def test_open_restores_names_from_matching_payload_hash(tmp_path, monkeypatch):
     assert node_token not in rendered
     # the decoded page holds real values, so it is owner-only
     assert (output.stat().st_mode & 0o777) == 0o600
+
+
+def test_open_draws_the_report_with_the_shared_renderer(tmp_path, monkeypatch):
+    # the page embeds report.js and report.css from the package, the same files the web view uses,
+    # and report text can't close the data script early
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    source = tmp_path / "report.json"
+    source.write_text(json.dumps({"summary": {"notes": "</script><script>alert(1)</script>"}, "observe": {}, "mine": {}}))
+    output = tmp_path / "report.html"
+    assert cli.main(["open", str(source), "-o", str(output)]) == 0
+    rendered = output.read_text()
+    assert (STATIC / "report.js").read_text() in rendered
+    assert (STATIC / "report.css").read_text() in rendered
+    assert "ProfilerReport.render(" in rendered
+    assert "<script>alert(1)" not in rendered
+    assert rendered.count("</script>") == 3  # the data, the renderer and the call: nothing from the report
 
 
 def test_open_refuses_an_oversized_or_too_deeply_nested_report(tmp_path):
