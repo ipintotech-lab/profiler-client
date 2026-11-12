@@ -379,6 +379,17 @@ def test_otel_ids_are_span_ids_in_the_parents_id_space(tmp_path):
     assert next(e for e in events if e.get("parent") == llm["event_id"])["event_type"] == "tool_call"
 
 
+def test_otel_tools_under_a_skipped_span_link_to_the_llm_call_that_chose_them(tmp_path):
+    # every span's parent is an agent/chain span the client skips, as most GenAI instrumentations emit
+    path = _write(tmp_path, "spans.json", _otel_rows()[0], document=True)
+    prepare([path], tmp_path / "ready", Names(Pseudonymizer(new_key())))
+    events = [json.loads(line) for line in (tmp_path / "ready" / EVENTS).read_text().splitlines()[1:]]
+    first_llm = next(e for e in events if e["event_type"] == "decision")
+    tools = [e for e in events if e["event_type"] == "tool_call"]
+    assert len(tools) == 2 and all(t["parent"] == first_llm["event_id"] for t in tools)
+    assert all(e["parent"] != first_llm["event_id"] for e in events if e["event_type"] == "decision")
+
+
 def test_an_event_log_keeps_its_own_ids_and_parents_as_pseudonyms(tmp_path):
     rows = _event_rows()
     rows["events"][0]["id"] = "acme-evt-1"

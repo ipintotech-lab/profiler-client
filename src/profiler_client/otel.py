@@ -15,6 +15,9 @@ frameworks emit:
 Other spans (agents, chains, HTTP) only give structure and are skipped.
 Within a trace, an LLM call's trigger is the tools that ran since the
 previous LLM call, and its selection the tools that run until the next.
+A tool span's ``parent`` is its own parent span when that is an LLM or tool
+call; when it is a skipped span (an agent or chain), the parent is the LLM
+call that selected the tool, so the map can still draw which call chose it.
 
 Service, workflow, agent and tool names are pseudonyms unless
 ``--keep-names``; ids, arguments, results and error messages always are.
@@ -123,6 +126,7 @@ def convert_otel_export(rows: list[dict], names: Names) -> Conversion:
         spans.sort(key=lambda s: s[0])
         llm: dict | None = None
         trigger_parts: set[str] = set()
+        kept = {s[4].get("spanId") for s in spans}
         for start, kind, resource, attrs, span, where in spans:
             end = int(span.get("endTimeUnixNano") or 0)
             conversation = _first(attrs, "gen_ai.conversation.id", "session.id")
@@ -185,6 +189,8 @@ def convert_otel_export(rows: list[dict], names: Names) -> Conversion:
                 result = f"error:{names.token('output', (span.get('status') or {}).get('message'))}"
             else:
                 result = "no_result"
+            if llm is not None and span.get("parentSpanId") not in kept:
+                event["parent"] = llm["event_id"]
             events.append({
                 **event,
                 "event_type": "tool_call",
