@@ -18,6 +18,9 @@ dev = ["pytest>=7.4"]
 [project.scripts]
 profiler-client = "profiler_client.cli:main"
 
+[tool.setuptools.package-data]
+profiler_client = ["static/*"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
