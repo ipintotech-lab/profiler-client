@@ -57,7 +57,7 @@ def _calls(message: dict) -> list[tuple[str | None, str, dict]]:
     return calls
 
 
-def _convert(record: dict, names: Names, namer: Namer) -> list[dict]:
+def _convert(record: dict, names: Names, namer: Namer, place: int = 0) -> list[dict]:
     record_id = record.get("id")
     base = record_id if record_id is not None else secrets.token_hex(16)
     trace = names.token("id", base)
@@ -107,6 +107,7 @@ def _convert(record: dict, names: Names, namer: Namer) -> list[dict]:
                 "trigger": trigger,
                 "tokens": {"input": int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0),
                            "output": int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)},
+                "_source": [place, "messages", index],
             }
             finish = message.get("finish_reason")
             if finish in policy.STOP_REASONS:
@@ -132,6 +133,7 @@ def _convert(record: dict, names: Names, namer: Namer) -> list[dict]:
                     "input_complete": True,
                     "result": "no_result",
                     "_call_id": call_id,
+                    "_source": [place, "messages", index],
                 }
                 events.append(call)
                 open_calls.append(call)
@@ -141,6 +143,6 @@ def _convert(record: dict, names: Names, namer: Namer) -> list[dict]:
 
 def convert_chat_trajectories(rows: list, names: Names) -> Conversion:
     namer = Namer(names)
-    records = [r for r in rows if is_chat_trajectory(r)]
-    events = [e for r in records for e in _convert(r, names, namer)]
+    records = [(place, r) for place, r in enumerate(rows) if is_chat_trajectory(r)]
+    events = [e for place, r in records for e in _convert(r, names, namer, place)]
     return Conversion(events=events, sessions=len(records), sessions_without_cost=len(records))

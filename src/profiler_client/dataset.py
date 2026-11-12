@@ -95,6 +95,15 @@ def read_records(path: Path) -> list:
     return rows
 
 
+def describe(path: Path) -> dict:
+    """A trace file's absolute path, size and SHA-256, to tell later whether it changed."""
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return {"path": str(path.resolve()), "size": path.stat().st_size, "sha256": digest.hexdigest()}
+
+
 def _read_document(path: Path, jsonl_problem: str) -> list:
     try:
         document = json.loads(path.read_bytes())
@@ -124,7 +133,9 @@ def detect(rows: list) -> str | None:
     return next((name for name, matches, _ in FORMATS if matches(rows)), None)
 
 
-def prepare(paths: list[Path], out_dir: Path, names: Names) -> dict:
+def prepare(paths: list[Path], out_dir: Path, names: Names, refs: dict | None = None) -> dict:
+    """Convert ``paths`` into a sealed dataset in ``out_dir``. With ``refs``,
+    also fill it with where each event came from (see ``trace_refs``)."""
     if out_dir.exists() and any(out_dir.iterdir()):
         raise PrepareError("OUTPUT_NOT_EMPTY", f"{out_dir} already has files; pick an empty or new directory")
     events: list[dict] = []
@@ -133,6 +144,8 @@ def prepare(paths: list[Path], out_dir: Path, names: Names) -> dict:
     converters = {name: convert for name, _, convert in FORMATS}
     for file_index, path in enumerate(paths):
         rows = read_records(path)
+        if refs is not None:
+            refs.setdefault("files", []).append(describe(path))
         source = detect(rows)
         if source is None:
             raise PrepareError("FORMAT_UNSUPPORTED", f"{path} is not a supported trace format: "
@@ -140,10 +153,12 @@ def prepare(paths: list[Path], out_dir: Path, names: Names) -> dict:
         conversion = converters[source](rows, names)
         if not conversion.events:
             raise PrepareError("NO_EVENTS", f"{path} ({source}) has no LLM or tool calls to prepare")
-        for index, event in enumerate(conversion.events):
+        for index, (event, where) in enumerate(zip(conversion.events, conversion.sources)):
             if not event.get("event_id"):
                 # the source had no id for it: one from its place in the input
                 event["event_id"] = names.token("id", ["event", file_index, index])
+            if refs is not None and where is not None:
+                refs.setdefault("events", {}).setdefault(event["event_id"], [file_index, *where])
         formats.add(source)
         events.extend(conversion.events)
         sessions += conversion.sessions

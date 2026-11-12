@@ -258,6 +258,7 @@ def test_runs_with_the_network_disabled(tmp_path, transcript_file, monkeypatch, 
 
     monkeypatch.setattr(socket, "socket", no_network)
     monkeypatch.setattr(socket, "create_connection", no_network)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     out = tmp_path / "ready"
     assert cli.main(["prepare", str(transcript_file), "-o", str(out)]) == 0
     assert cli.main(["validate", str(out)]) == 0
@@ -267,6 +268,10 @@ def test_runs_with_the_network_disabled(tmp_path, transcript_file, monkeypatch, 
     report = out.with_suffix(".report.json")
     report.write_text(json.dumps({"summary": {"totals": {}}, "observe": {}, "mine": {}}))
     assert cli.main(["open", str(report), "-o", str(tmp_path / "r.html")]) == 0
+    # and so is show-event
+    seal, events = read_sealed((out / EVENTS).read_bytes())
+    report.write_text(json.dumps({"payload_sha256": seal["payload_sha256"]}))
+    assert cli.main(["show-event", str(report), events[0]["event_id"]]) == 0
 
 
 def test_lint_takes_an_input_field_only_as_a_pseudonym_under_a_pseudonym_or_kept_name():
