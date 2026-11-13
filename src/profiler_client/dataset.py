@@ -133,6 +133,19 @@ def detect(rows: list) -> str | None:
     return next((name for name, matches, _ in FORMATS if matches(rows)), None)
 
 
+def convert_file(path: Path, names: Names) -> tuple[str, object]:
+    """Read one trace file and convert it to contract events, in memory."""
+    rows = read_records(path)
+    source = detect(rows)
+    if source is None:
+        raise PrepareError("FORMAT_UNSUPPORTED", f"{path} is not a supported trace format: "
+                                                 + ", ".join(name for name, _, _ in FORMATS))
+    conversion = {name: convert for name, _, convert in FORMATS}[source](rows, names)
+    if not conversion.events:
+        raise PrepareError("NO_EVENTS", f"{path} ({source}) has no LLM or tool calls to prepare")
+    return source, conversion
+
+
 def prepare(paths: list[Path], out_dir: Path, names: Names, refs: dict | None = None) -> dict:
     """Convert ``paths`` into a sealed dataset in ``out_dir``. With ``refs``,
     also fill it with where each event came from (see ``trace_refs``)."""
@@ -141,18 +154,10 @@ def prepare(paths: list[Path], out_dir: Path, names: Names, refs: dict | None = 
     events: list[dict] = []
     sessions = sessions_without_cost = 0
     formats: set[str] = set()
-    converters = {name: convert for name, _, convert in FORMATS}
     for file_index, path in enumerate(paths):
-        rows = read_records(path)
+        source, conversion = convert_file(path, names)  # refuses symlinks and non-files first
         if refs is not None:
             refs.setdefault("files", []).append(describe(path))
-        source = detect(rows)
-        if source is None:
-            raise PrepareError("FORMAT_UNSUPPORTED", f"{path} is not a supported trace format: "
-                                                     + ", ".join(name for name, _, _ in FORMATS))
-        conversion = converters[source](rows, names)
-        if not conversion.events:
-            raise PrepareError("NO_EVENTS", f"{path} ({source}) has no LLM or tool calls to prepare")
         for index, (event, where) in enumerate(zip(conversion.events, conversion.sources)):
             if not event.get("event_id"):
                 # the source had no id for it: one from its place in the input
