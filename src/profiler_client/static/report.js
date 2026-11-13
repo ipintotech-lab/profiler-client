@@ -171,7 +171,7 @@ function renderMap(q, data) {
   const branches = shown.filter(n => (out.get(n.id) || []).length > 1)
     .map(n => `${name(n.id)} goes ${out.get(n.id).length} ways: it ${out.get(n.id).map(e => way(n, e)).join(', ')}. `).join('');
   q('mapWhy').textContent = branches + (left ? `This shows the ${count(links.length)} most-taken of ${plural(graph.edges.length, 'link')}; ${plural(unlinked, 'step')} ${unlinked === 1 ? 'is' : 'are'} left out, and all are in the table below. ` : '') +
-    `Arrow width is how many times a hop happened across ${plural(graph.run_count, 'run')}; where a step goes more than one way, the % is that way's share. Every link is recorded in the trace: an LLM call choosing a tool, the tool whose result the next LLM call read, the prompt that started a run, and the LLM call that replied.`;
+    `Arrow width is how many times a hop happened across ${plural(graph.run_count, 'run')}; where a step goes more than one way, the % is that way's share. Links come from the trace: an LLM call choosing a tool, the tool whose result the next LLM call read, the prompt that started a run, and the LLM call that replied. Where a trace doesn't record which LLM call chose a tool or read its result (OpenTelemetry traces often don't), the link is taken from the order the calls ran in within one run.`;
 }
 
 const gapsOf = data => (data.data_quality?.gaps || []).filter(gap => gap.key !== 'user_input');  // the client drops it on purpose
