@@ -427,6 +427,22 @@ def test_open_keeps_only_the_event_ids_a_map_step_can_look_up(tmp_path, monkeypa
     assert run_id not in rendered and "not an id" not in rendered
 
 
+def test_open_keeps_each_map_steps_agent_with_its_name_restored(tmp_path, monkeypatch):
+    # the map draws a workflow of several agents in one band per agent
+    payload_hash = "c" * 64
+    agent_token = "h:" + "6" * 64
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    write_name_list(payload_hash, {agent_token: "fraud-screening"}, tmp_path / "profiler-client" / "names")
+    source = tmp_path / "report.json"
+    source.write_text(json.dumps({"payload_sha256": payload_hash, "graph": {"run_count": 1, "edges": [], "nodes": [
+        {"id": "step", "kind": "step", "agent": agent_token, "occurrences": 1, "cost": 0, "extra": "dropped"}]}}))
+    output = tmp_path / "report.html"
+    assert cli.main(["open", str(source), "-o", str(output)]) == 0
+    rendered = output.read_text()
+    assert '"agent": "fraud-screening"' in rendered or '"agent":"fraud-screening"' in rendered
+    assert agent_token not in rendered and "dropped" not in rendered
+
+
 def test_open_keeps_the_headline_and_next_steps_but_no_input_slice(tmp_path, monkeypatch):
     # "do these first" names steps (restored on this machine); a region's slice is an input value, never written
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))

@@ -178,7 +178,7 @@ def _workflow_view(report: dict) -> dict:
         "availability": {"graph": _pick(_pick(report.get("availability"), ("graph",)).get("graph"), ("available", "code")) or None},
         "graph": {
             "run_count": graph.get("run_count"),
-            "nodes": [_pick(n, ("id", "kind", "occurrences", "cost")) for n in _list(graph.get("nodes"))],
+            "nodes": [_pick(n, ("id", "kind", "agent", "occurrences", "cost")) for n in _list(graph.get("nodes"))],
             "edges": [{**_pick(e, ("from", "to", "kind", "transition_count", "distinct_run_count")),
                        # only the event ids, for show-event: a pseudonym never restored, nothing of the call
                        "evidence_sample": [{"event_id": x["event_id"]} for x in _list(e.get("evidence_sample"))
