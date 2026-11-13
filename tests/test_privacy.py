@@ -11,7 +11,7 @@ from profiler_client.dataset import EVENTS, PrepareError, prepare, read_sealed, 
 from profiler_client.lint import check_event
 from profiler_client.names import Names
 from profiler_client.pseudonym import Pseudonymizer, load_or_create_key, new_key
-from profiler_client.report import STATIC, write_name_list
+from profiler_client.report import STATIC, view, write_name_list
 
 
 def _events(rows, key=b"k" * 32):
@@ -425,3 +425,32 @@ def test_open_keeps_only_the_event_ids_a_map_step_can_look_up(tmp_path, monkeypa
     rendered = output.read_text()
     assert event_id in rendered and str(source.resolve()) in rendered
     assert run_id not in rendered and "not an id" not in rendered
+
+
+def test_open_keeps_the_headline_and_next_steps_but_no_input_slice(tmp_path, monkeypatch):
+    # "do these first" names steps (restored on this machine); a region's slice is an input value, never written
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    payload_hash, node_token, value_token = "b" * 64, "h:" + "2" * 64, "h:" + "3" * 64
+    write_name_list(payload_hash, {node_token: "calculate-total", value_token: "private-input"},
+                    tmp_path / "profiler-client" / "names")
+    step = {"step": "review", "do": "Check it.", "type": "DETERMINISTIC_REGION", "title": node_token, "nodes": [node_token],
+            "where": f"severity={value_token}", "saving": 1.5, "risk": "medium", "risk_reasons": ["12 calls in the slice"],
+            "observations": 12, "group": 0, "workflow": "wf"}
+    source = tmp_path / "report.json"
+    source.write_text(json.dumps({"payload_sha256": payload_hash, "summary": {
+        "totals": {"cost": 4}, "replaceable": {"cost": 1.5, "findings": 1},
+        "risk_labels": {"medium": "Needs review"}, "next_steps": [step]}}))
+    page = view(json.loads(source.read_text()))["summary"]
+    assert page["replaceable"] == {"cost": 1.5, "findings": 1} and page["risk_labels"] == {"medium": "Needs review"}
+    assert set(page["next_steps"][0]) == set(step) - {"where", "group", "workflow"}
+    output = tmp_path / "report.html"
+    assert cli.main(["open", str(source), "-o", str(output)]) == 0
+    rendered = output.read_text()
+    assert "calculate-total" in rendered and node_token not in rendered
+    assert "private-input" not in rendered and value_token not in rendered
+
+
+def test_a_report_without_next_steps_draws_no_cards():
+    # an older or diagnose-mode report: the renderer hides "do these first" when next_steps is absent
+    assert "next_steps" not in view({"summary": {"totals": {"cost": 1}}})["summary"]
+    assert view({"summary": {"next_steps": []}})["summary"]["next_steps"] == []

@@ -3,4 +3,4 @@
 Nothing in this package opens a network connection: ``prepare``,
 ``validate`` and ``inspect`` work offline, and the tests prove it.
 """
-__version__ = "0.8.2"
+__version__ = "0.9.0"
