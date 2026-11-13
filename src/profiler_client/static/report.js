@@ -104,9 +104,10 @@ const MAP_NONE = {
   NO_PARENT_LINKS: "No map: no step in this dataset names the step that started it, so there are no links to draw. The map isn't guessed from the order steps ran in.",
 };
 const MAP_LINKS = 14;
+const MAP_MIN_SCALE = 0.8;  // a map never shrinks below this to fit its box: a wider one scrolls sideways inside it
 const MAP_END = { '@prompt': 'Prompt', '@reply': 'Reply' };
 const plainName = n => String(n).replace(HASH, 'h:$1');
-function renderMap(q, data) {
+function renderMap(q, data, all = false) {
   const avail = data.availability?.graph, graph = data.graph;
   if (!avail?.available || !graph) {
     const why = avail ? MAP_NONE[avail.code] || 'No map for this dataset.' : 'No map: this report was made before maps were added.';
@@ -131,10 +132,10 @@ function renderMap(q, data) {
     : Math.max(0, agents.indexOf(byId.get(id)?.agent));
   const handoff = e => bandOf(e.from) !== bandOf(e.to);
   // the most-taken links (the server lists them most-taken first) and the steps they join;
-  // in bands, every handoff and the most-taken links inside each band
+  // in bands, every handoff and the most-taken links inside each band; `all` draws every link
   const inBand = new Map();
   const links = graph.edges.filter(e => {
-    if (handoff(e)) return true;
+    if (all || handoff(e)) return true;
     const b = bandOf(e.from), n = inBand.get(b) || 0;
     inBand.set(b, n + 1);
     return n < MAP_LINKS;
@@ -150,7 +151,7 @@ function renderMap(q, data) {
   const lines = n => {
     if (n.kind === 'llm_call') {
       const after = String(n.id).replace(/^llm_call ← /, '');
-      return ['LLM call', `after ${fit(after === 'user_prompt' ? 'prompt' : label(after), 18)}`, `${count(n.occurrences)} · ${money(n.cost)}`];
+      return ['LLM call', `after ${fit(after === 'user_prompt' ? 'prompt' : label(after), 15)}`, `${count(n.occurrences)} · ${money(n.cost)}`];
     }
     return letters.has(n.id) ? [letters.get(n.id), fit(plainName(n.id), 20), plural(n.occurrences, 'call')]
       : [fit(plainName(n.id), 18), '', plural(n.occurrences, 'call')];
@@ -238,7 +239,7 @@ function renderMap(q, data) {
     } else if (cb > ca) {  // rightwards to another row: leave by the top or bottom, clear of the row's own links
       const up = rb < ra, x1 = a.x + a.w - 10, y1 = up ? a.y : a.y + a.h, x2 = b.x - 2, y2 = b.cy;
       d = `M${x1},${y1} C${x1},${y2} ${x1},${y2} ${x2},${y2}`;
-      lx = (x1 + x2) / 2 + 20; ly = y2 - 8;  // over its level run
+      lx = (x1 + x2) / 2; ly = y2 - 8;  // over its level run, between the two columns
     } else {  // back to an earlier column: arc over the top
       const x1 = a.cx, x2 = b.cx, y1 = a.y, y2 = b.y - 2, high = Math.min(y1, y2) - 34;
       d = `M${x1},${y1} C${x1},${high} ${x2},${high} ${x2},${y2}`; lx = (x1 + x2) / 2; ly = high + 8;
@@ -265,16 +266,19 @@ function renderMap(q, data) {
       (s1 ? `<text class="s" x="${b.x + 14}" y="${b.y + 44}">${esc(s1)}</text>` : '') +
       `<text class="s" x="${b.x + 14}" y="${b.y + (s1 ? 59 : 50)}">${esc(s2)}${loop ? ` · ↻ ${esc(count(loop))}` : ''}</text>${badges.join('')}</g>`;
   });
+  const left = graph.edges.length - links.length, unlinked = graph.nodes.filter(n => !joined.has(n.id)).length;
+  const more = left ? `<p class="more">${esc(`This map shows the ${count(links.length)} most-taken of ${plural(graph.edges.length, 'link')}. ${plural(left, 'link')}${unlinked ? ` and ${plural(unlinked, 'step')}` : ''} ${left + unlinked === 1 ? 'is' : 'are'} hidden to keep it readable; every step is in the table below.`)} ` +
+      `<button type="button" class="link" data-map="all">Show all ${count(graph.edges.length)} links</button></p>`
+    : all && graph.edges.length > MAP_LINKS ? `<p class="more">Showing all ${count(graph.edges.length)} links. <button type="button" class="link" data-map="less">Show only the most-taken</button></p>` : '';
   const present = Object.keys(MARK).filter(k => [...marks.values()].some(m => m.kinds.has(k)));
   q('map').innerHTML = (present.length ? `<p class="legend marks">${present.map(k => `<span><i class="pill ${k}">${esc(MARK[k].badge)}</i>${esc(MARK[k].legend)}</span>`).join('')}` +
-    '<span>Select a marked step to see its rows in the table</span></p>' : '') + `<div class="mapscroll"><svg viewBox="0 0 ${width} ${height}" style="min-width:${Math.min(width, 720)}px" role="img" aria-label="${esc(`Workflow map: ${plural(shown.length, 'step')}${banded ? ` in ${plural(bands.length, 'agent')}` : ''} and ${plural(paths.length, 'link')} across ${plural(graph.run_count, 'run')}`)}">` +
+    '<span>Select a marked step to see its rows in the table</span></p>' : '') + `<div class="mapscroll"><svg viewBox="0 0 ${width} ${height}" style="min-width:${Math.round(width * MAP_MIN_SCALE)}px" role="img" aria-label="${esc(`Workflow map: ${plural(shown.length, 'step')}${banded ? ` in ${plural(bands.length, 'agent')}` : ''} and ${plural(paths.length, 'link')} across ${plural(graph.run_count, 'run')}`)}">` +
     `<defs><marker id="mapArrow" ${ARROW}><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker>` +
     `<marker id="mapArrowHot" ${ARROW}><path class="arrow hot" d="M0,0 L10,5 L0,10 z"/></marker></defs>` +
-    bandRects.join('') + paths.join('') + nodes.join('') + '</svg></div>' +
+    bandRects.join('') + paths.join('') + nodes.join('') + '</svg></div>' + more +
     '<p class="legend kinds"><span><i class="sw llm"></i>LLM call (has a cost)</span><span><i class="sw tool"></i>Tool call</span>' +
     (hot && total ? `<span><i class="sw hot"></i>Largest share of spend (${Math.round(100 * hot.cost / total)}%)</span>` : '') + '</p>';
 
-  const left = graph.edges.length - links.length, unlinked = graph.nodes.filter(n => !joined.has(n.id)).length;
   const name = id => MAP_END[id] || (byId.get(id)?.kind === 'llm_call' ? lines(byId.get(id)).slice(0, 2).join(' ') : label(id));
   const way = (n, e) => {
     const read = String(n.id).replace(/^llm_call ← /, '');
@@ -285,7 +289,7 @@ function renderMap(q, data) {
   const branches = shown.filter(n => (out.get(n.id) || []).length > 1)
     .map(n => `${name(n.id)} goes ${out.get(n.id).length} ways: it ${out.get(n.id).map(e => way(n, e)).join(', ')}. `).join('');
   const handoffs = banded ? `Each band is one agent, in the order runs reach them; a link from one band to the next is a handoff, labelled with how many runs took it. ` : '';
-  q('mapWhy').textContent = handoffs + branches + (left ? `This shows the ${count(links.length)} most-taken of ${plural(graph.edges.length, 'link')}; ${plural(unlinked, 'step')} ${unlinked === 1 ? 'is' : 'are'} left out, and all are in the table below. ` : '') +
+  q('mapWhy').textContent = handoffs + branches +
     `Arrow width is how many times a hop happened across ${plural(graph.run_count, 'run')}; where a step goes more than one way, the % is that way's share. Links come from the trace: an LLM call choosing a tool, the tool whose result the next LLM call read, the prompt that started a run, and the LLM call that replied. Where a trace doesn't record which LLM call chose a tool or read its result (OpenTelemetry traces often don't), the link is taken from the order the calls ran in within one run.`;
   return marks;
 }
@@ -439,9 +443,11 @@ function wireEvents(q, data, reportPath) {
     g.addEventListener('click', () => show(g));
     g.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); show(g); } });
   }
-  if (!q('map').querySelector('g.pick')) return;
-  q('map').querySelector('.legend.kinds')?.insertAdjacentHTML('beforeend', '<span>Click a step to look up example calls</span>');
-  panel.addEventListener('click', e => {
+  if (q('map').querySelector('g.pick')) q('map').querySelector('.legend.kinds')?.insertAdjacentHTML('beforeend', '<span>Click a step to look up example calls</span>');
+}
+
+function wireCopy(q) {
+  q('events').addEventListener('click', e => {
     const b = e.target.closest('button[data-copy]');
     if (!b) return;
     const code = b.previousElementSibling;
@@ -503,10 +509,12 @@ function renderFirst(q, data, onMap) {
   </li>`).join('')}</ol>`;
 }
 
-// a marked map step shows its rows in the table; a card's button shows its steps on the map
+// select steps on the map as it is drawn now
+const pickOnMap = (q, ids) => q('map').querySelectorAll('g[data-node]').forEach(g => g.classList.toggle('sel', ids.has(g.dataset.node)));
+
+// a marked map step shows its rows in the table
 function wireMarks(q, data, marks) {
   const groups = [...q('map').querySelectorAll('g[data-node]')];
-  const pick = ids => groups.forEach(g => g.classList.toggle('sel', ids.has(g.dataset.node)));
   const rows = ids => [...q('steps').querySelectorAll('tr[data-node]')].filter(tr => ids.has(tr.dataset.node));
   const showRows = id => {
     const ids = marks.get(id).rows;
@@ -517,7 +525,7 @@ function wireMarks(q, data, marks) {
     }
     q('steps').querySelectorAll('tr.hl').forEach(tr => tr.classList.remove('hl'));
     found.forEach(tr => tr.classList.add('hl'));
-    pick(new Set([id]));
+    pickOnMap(q, new Set([id]));
     found[0]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   };
   for (const g of groups.filter(g => marks.has(g.dataset.node))) {
@@ -529,12 +537,6 @@ function wireMarks(q, data, marks) {
     g.addEventListener('click', () => showRows(id));
     g.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showRows(id); } });
   }
-  q('first').addEventListener('click', e => {
-    const b = e.target.closest('button[data-first]');
-    if (!b) return;
-    pick(new Set(findingNodes(data.summary.next_steps[b.dataset.first])));
-    q('map').scrollIntoView({ block: 'center', behavior: 'smooth' });
-  });
 }
 
 function renderHead(q, g, name, meta) {
@@ -549,10 +551,27 @@ function renderReport(root, data, { name = '', meta = [], showEvent = null } = {
   const q = k => root.querySelector(`[data-r="${k}"]`);
   const sm = data.summary || {}, t = sm.totals || {}, g = data.grade;
   renderHead(q, g, name, meta);
-  const marks = renderMap(q, data);
-  if (showEvent) wireEvents(q, data, showEvent);
+  // the map, its wiring and the cards that point at it, drawn again when the reader shows all links or fewer
+  const drawMap = all => {
+    const marks = renderMap(q, data, all);
+    if (showEvent) wireEvents(q, data, showEvent);
+    wireMarks(q, data, marks);
+    renderFirst(q, data, new Set([...q('map').querySelectorAll('g[data-node]')].map(g => g.dataset.node)));
+  };
   renderLead(q, data);
-  renderFirst(q, data, new Set([...q('map').querySelectorAll('g[data-node]')].map(g => g.dataset.node)));
+  q('map').addEventListener('click', e => {
+    const b = e.target.closest('button[data-map]');
+    if (!b) return;
+    drawMap(b.dataset.map === 'all');
+    q('map').querySelector('button[data-map]')?.focus({ preventScroll: true });
+  });
+  if (showEvent) wireCopy(q);
+  q('first').addEventListener('click', e => {
+    const b = e.target.closest('button[data-first]');
+    if (!b) return;
+    pickOnMap(q, new Set(findingNodes(data.summary.next_steps[b.dataset.first])));
+    q('map').scrollIntoView({ block: 'center', behavior: 'smooth' });
+  });
   q('totals').innerHTML = `${money(t.cost)} <span class="k">across</span> ${plural(t.runs, 'run')}<span class="k">,</span> ` +
     `${plural(t.llm_calls, 'LLM call')} <span class="k">and</span> ${plural(t.tool_calls, 'tool call')}<span class="k">,</span> ${count(t.tokens)} tokens.`;
 
@@ -562,7 +581,7 @@ function renderReport(root, data, { name = '', meta = [], showEvent = null } = {
     ? `This report covers one workflow, ${stepName(wf.name)}: ${plural(wf.num_runs, 'run')} of the ${count(allRuns)} in your dataset.` : '';
   q('scope').hidden = !(wf && workflows.length > 1);
   renderSteps(q, data, false);
-  wireMarks(q, data, marks);
+  drawMap(false);
   q('steps').addEventListener('click', e => {
     const b = e.target.closest('button[data-steps]');
     if (b) renderSteps(q, data, b.dataset.steps === 'all');
