@@ -390,6 +390,35 @@ def test_otel_tools_under_a_skipped_span_link_to_the_llm_call_that_chose_them(tm
     assert all(e["parent"] != first_llm["event_id"] for e in events if e["event_type"] == "decision")
 
 
+def test_otel_a_named_decision_is_its_own_node_with_its_input_and_choice(tmp_path):
+    rows = _otel_rows()[0]
+    spans = rows["resourceSpans"][0]["scopeSpans"][0]["spans"]
+    named = {"traceloop.entity.name": "handoff", "traceloop.entity.input": json.dumps({"from": "intake", "case": "Acme"})}
+    spans[1]["attributes"] += [_attr(k, v) for k, v in {**named, "traceloop.entity.output": '"review"'}.items()]
+    second = json.loads(json.dumps(spans[1]))
+    second.update(spanId="s5", startTimeUnixNano="9500000", endTimeUnixNano="9600000")
+    second["attributes"] = [a for a in second["attributes"] if a["key"] != "traceloop.entity.output"]
+    second["attributes"].append(_attr("traceloop.entity.output", '"payments"'))
+    spans.append(second)
+    path = _write(tmp_path, "spans.json", rows, document=True)
+    names = Names(Pseudonymizer(new_key()), keep=True)
+    prepare([path], tmp_path / "ready", names)
+    events = [json.loads(line) for line in (tmp_path / "ready" / EVENTS).read_text().splitlines()[1:]]
+    handoffs = [e for e in events if e["node"] == "handoff"]
+    assert len(handoffs) == 2
+    first, again = handoffs
+    assert set(first["input_state"]) == {"from", "case"} and first["input_complete"] is True
+    assert first["input_state"] == again["input_state"]  # the same input ...
+    assert first["decision"] == {"type": "handoff", "selected": "review"}
+    assert again["decision"] == {"type": "handoff", "selected": "payments"}
+    assert first["result"] != again["result"]  # ... a different choice
+    assert first["result"].startswith("success:") and first["trigger"] == "user_prompt"
+    # the tools it chose still hang under it; an unnamed call is named by its trigger
+    assert {e["parent"] for e in events if e["event_type"] == "tool_call"} == {first["event_id"]}
+    assert [e["node"] for e in events if e["event_type"] == "decision"][1].startswith("llm_call ← ")
+    assert "Acme" not in (tmp_path / "ready" / EVENTS).read_text()
+
+
 def test_an_event_log_keeps_its_own_ids_and_parents_as_pseudonyms(tmp_path):
     rows = _event_rows()
     rows["events"][0]["id"] = "acme-evt-1"
