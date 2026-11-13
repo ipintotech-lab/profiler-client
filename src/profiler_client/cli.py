@@ -3,6 +3,7 @@ sent anywhere.
 
     profiler-client prepare ~/.claude/projects/<project>/<session>.jsonl -o analysis-ready
     profiler-client prepare ~/.codex/sessions/2026/10/18/rollout-*.jsonl -o analysis-ready
+    profiler-client check ~/traces/*.jsonl --prices 1.25,10
     profiler-client inspect analysis-ready
     profiler-client validate analysis-ready
     profiler-client show-event report.json h:<event id>
@@ -15,13 +16,15 @@ import json
 import os
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 from . import __version__, policy
-from .contract import CONTRACT_VERSION
-from .dataset import EVENTS, PrepareError, prepare, read_sealed, summary, validate
+from .contract import CONTRACT_VERSION, TraceEvent
+from .dataset import EVENTS, PrepareError, convert_file, prepare, read_sealed, summary, validate
 from .names import Names
 from .pseudonym import TOKEN, Pseudonymizer, load_or_create_key, new_key
+from .readiness import readiness, remediation, workflows
 from .report import forget_name_lists, read_name_lists, render_html, translate, write_name_list
 from .trace_refs import original_record, read_refs, refs_dir, write_refs
 
@@ -40,8 +43,8 @@ def _prepare(args: argparse.Namespace) -> int:
     names = Names(Pseudonymizer(key), keep=args.keep_names, llm_inputs=args.llm_inputs)
     refs = None if args.no_name_list else {}
     manifest = prepare(paths, Path(args.output), names, refs)
+    seal, events = read_sealed((Path(args.output) / EVENTS).read_bytes())
     if refs is not None:
-        seal, _ = read_sealed((Path(args.output) / EVENTS).read_bytes())
         write_name_list(seal["payload_sha256"], {**names.seen, **names.field_values()})
         write_refs(seal["payload_sha256"], refs)
     print(f"wrote {manifest['events']} events from {manifest['sessions']} session(s) "
@@ -52,9 +55,83 @@ def _prepare(args: argparse.Namespace) -> int:
     if manifest["sessions_without_cost"]:
         print(f"note: {manifest['sessions_without_cost']} session(s) recorded no cost; their cost shows as 0",
               file=sys.stderr)
+    report = readiness([TraceEvent.model_validate(e) for e in events])
+    print("\n" + _check_text({"readable": {"files": len(paths), "read": len(paths), "skipped": [],
+                                            "formats": dict.fromkeys(manifest["source_format"].split("+"), 1)},
+                               **report, "remediation": remediation(report, prices=False)}), file=sys.stderr)
     if not args.key_file:
         print("note: a fresh key was used and not kept, so this dataset can't be linked to any other", file=sys.stderr)
     return 0
+
+GRADE_ORDER = "ABCD"
+
+
+def _prices(text: str | None) -> tuple[float, float] | None:
+    if text is None:
+        return None
+    try:
+        given, chose = (float(x) for x in text.split(","))
+    except ValueError:
+        raise ValueError("--prices takes two numbers: IN,OUT in $ per 1M input and output tokens") from None
+    if given < 0 or chose < 0:
+        raise ValueError("token prices can't be negative")
+    return given, chose
+
+
+def _check(args: argparse.Namespace) -> int:
+    """Convert in memory and say what the analysis can find. Writes nothing,
+    keeps no key or name list, opens no connection."""
+    prices = _prices(args.prices)
+    names = Names(Pseudonymizer(new_key()))
+    events, formats, skipped = [], Counter(), []
+    for path in (Path(p) for p in args.files):
+        try:
+            source, conversion = convert_file(path, names)
+        except PrepareError as exc:
+            skipped.append({"file": path.name if args.names else None, "code": exc.code})
+            continue
+        formats[source] += 1
+        events.extend(TraceEvent.model_validate(e) for e in conversion.events)
+    readable = {"files": len(args.files), "read": sum(formats.values()), "formats": dict(formats),
+                "skipped": skipped}
+    if not events:
+        out = {"readable": readable}
+        print(json.dumps(out, indent=2) if args.json else
+              f"Read none of {len(args.files)} file(s): " + ", ".join(s["code"] for s in skipped), file=sys.stdout)
+        return 2
+    report = readiness(events, prices=prices is not None)
+    if args.names:
+        for w, name in zip(report["workflows"], (f["name"] for f in workflows(events))):
+            w["name"] = names.seen.get(name, name)
+    out = {"readable": readable, **report, "remediation": remediation(report, prices is not None)}
+    print(json.dumps(out, indent=2, ensure_ascii=False) if args.json else _check_text(out))
+    if args.min_grade and any(GRADE_ORDER.index(w["grade"]["grade"]) > GRADE_ORDER.index(args.min_grade)
+                              for w in report["workflows"]):
+        return 1
+    return 0
+
+
+def _check_text(out: dict) -> str:
+    r, d = out["readable"], out["dataset"]
+    lines = [(f"Read {r['read']} of {r['files']} file(s) ({', '.join(sorted(r['formats']))}). "
+              f"{d['events']:,} events, {d['workflows']} workflow{'' if d['workflows'] == 1 else 's'}.")]
+    if r["skipped"]:
+        lines.append("Skipped: " + ", ".join(f"{s['file'] or 'a file'} ({s['code']})" for s in r["skipped"]))
+    g = d["grade"]
+    lines += ["", f"Dataset grade: {g['grade']} ({g['word']}, {g['score']}/100)"]
+    for c in g["checks"]:
+        lines.append(f"  {c['label']:<24} {c['status']:<8} {c['detail']}")
+    lines += ["", "What the analysis can find"]
+    for f in out["findings_possible"]:
+        lines.append(f"  {f['label']:<37} {f['status']:<8} {f['reason']}")
+    if len(out["workflows"]) > 1:
+        lines += ["", "Workflows"]
+        for w in out["workflows"]:
+            label = w.get("name") or f"workflow {w['index']}"
+            lines.append(f"  {label:<37} {w['grade']['grade']}  {w['runs']} runs, {w['events']:,} events")
+    if out["remediation"]:
+        lines += ["", "To get more"] + [f"  {line}" for line in out["remediation"]]
+    return "\n".join(lines)
 
 
 def _validate(args: argparse.Namespace) -> int:
@@ -66,7 +143,9 @@ def _validate(args: argparse.Namespace) -> int:
 
 def _inspect(args: argparse.Namespace) -> int:
     manifest, events = validate(Path(args.dataset))
-    print(json.dumps({"manifest": manifest, **summary(events)}, indent=2, ensure_ascii=False))
+    # the dataset-level part of ``check``; the raw-level part needs the raw files
+    ready = readiness([TraceEvent.model_validate(e) for e in events]) if events else None
+    print(json.dumps({"manifest": manifest, **summary(events), "readiness": ready}, indent=2, ensure_ascii=False))
     return 0
 
 
@@ -204,6 +283,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-name-list", action="store_true",
                    help="don't keep pseudonym-to-name mappings or event references (for show-event) on this machine")
     p.set_defaults(run=_prepare)
+
+    c = sub.add_parser("check", help="say what the analysis can find in raw traces, before preparing; "
+                                     "writes nothing and opens no connection")
+    c.add_argument("files", nargs="+", help="trace files, as for prepare; directories and symlinks are refused")
+    c.add_argument("--prices", metavar="IN,OUT", help="$ per 1M input and output tokens, to estimate missing cost")
+    c.add_argument("--json", action="store_true", help="print one JSON object")
+    c.add_argument("--names", action="store_true", help="list workflow and file names (left out by default)")
+    c.add_argument("--min-grade", choices=list(GRADE_ORDER), help="exit 1 when any workflow grades below this")
+    c.set_defaults(run=_check)
 
     v = sub.add_parser("validate", help="check a dataset: hash, privacy lint and contract")
     v.add_argument("dataset")

@@ -19,6 +19,7 @@ Python 3.10+; the only dependency is pydantic.
 ## Use
 
 ```
+profiler-client check ~/.claude/projects/<project>/*.jsonl   # what the analysis can find, before preparing
 profiler-client prepare ~/.claude/projects/<project>/<session>.jsonl -o analysis-ready
 profiler-client prepare ~/.codex/sessions/2026/10/18/rollout-*.jsonl -o analysis-ready
 profiler-client prepare spans.json --keep-names -o analysis-ready
@@ -28,6 +29,16 @@ profiler-client open report.json
 profiler-client forget report.json   # delete the local name list for that dataset
 profiler-client version
 ```
+
+`check` reads your raw traces in memory and prints the grade the server will
+give them, which findings the analysis can make from them (and which it
+can't, and why), and what to turn on or collect to get more. It writes
+nothing, keeps no key or name list and opens no connection. Its output holds
+only counts, shares and thresholds, so it is safe to send to support; add
+`--names` to list workflow and file names. `--prices IN,OUT` ($ per 1M input
+and output tokens) shows what cost estimated from tokens would allow,
+`--json` prints one object, and `--min-grade B` exits 1 when a workflow
+grades below B. `prepare` prints the same summary when it finishes.
 
 `prepare` saves a pseudonym-to-name list for the dataset in a private local
 directory (`$XDG_DATA_HOME/profiler-client/names/`, `~/.local/share/...` by
