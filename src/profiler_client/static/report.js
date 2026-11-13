@@ -3,6 +3,10 @@
  * ProfilerReport.render(root, data, { name, meta }) draws a report JSON into `root` (an element with
  * class "sheet"); `meta` is a list of short lines for under the title. It reads nothing but `data`,
  * makes no request, and writes only inside `root`. The host page adds its own buttons to `.tools`.
+ *
+ * A dataset overview (`data.overview` with `data.reports`, one report per workflow) draws a list of the
+ * workflows first; a row opens that workflow's report from `data.reports` and a back button returns.
+ * The host's buttons in `.tools`, and anything it appended to `root`, move along. render returns { show(workflow), overview() } to switch by code.
  */
 (function () {
 'use strict';
@@ -307,14 +311,17 @@ function renderSteps(q, data, showAllSteps) {
       : `${plural(steps.length - listed.length, 'more step')} recorded no cost and no repeats. <button class="link" type="button" data-steps="all">Show them</button>`}</td></tr>` : '');
 }
 
-const SHEET = `
+const HEAD = `
+  <button class="back" type="button" data-r="back" hidden>← All workflows</button>
   <div class="sheet-head">
     <div class="title">
       <div class="grade mini" data-r="grade" hidden><b data-r="gradeLetter"></b></div>
-      <div><h2 data-r="name"></h2><div class="when" data-r="meta"></div></div>
+      <div><h2 data-r="name" tabindex="-1"></h2><div class="when" data-r="meta"></div></div>
     </div>
     <div class="tools"></div>
-  </div>
+  </div>`;
+
+const SHEET = HEAD + `
   <div class="lead" data-r="lead" hidden>
     <p class="head" data-r="head"></p>
     <p class="sub" data-r="sub"></p>
@@ -476,14 +483,18 @@ function wireMarks(q, data, marks) {
   });
 }
 
-function render(root, data, { name = '', meta = [], showEvent = null } = {}) {
-  root.innerHTML = SHEET;
-  const q = k => root.querySelector(`[data-r="${k}"]`);
-  const sm = data.summary || {}, t = sm.totals || {}, g = data.grade;
+function renderHead(q, g, name, meta) {
   q('name').textContent = plainName(name);  // a pseudonym shows as its first 7 characters
   q('meta').textContent = [...meta, g && `dataset grade ${g.grade} (${String(g.word || '').toLowerCase()})`].filter(Boolean).join(' · ');
   q('grade').hidden = !g;
   if (g) { q('grade').dataset.g = g.grade; q('gradeLetter').textContent = g.grade; q('grade').setAttribute('aria-label', `Dataset grade ${g.grade}`); }
+}
+
+function renderReport(root, data, { name = '', meta = [], showEvent = null } = {}) {
+  root.innerHTML = SHEET;
+  const q = k => root.querySelector(`[data-r="${k}"]`);
+  const sm = data.summary || {}, t = sm.totals || {}, g = data.grade;
+  renderHead(q, g, name, meta);
   const marks = renderMap(q, data);
   if (showEvent) wireEvents(q, data, showEvent);
   renderLead(q, data);
@@ -507,6 +518,102 @@ function render(root, data, { name = '', meta = [], showEvent = null } = {}) {
   q('gaps').innerHTML = gaps.map(gap => `<dt>${esc(gap.label.charAt(0).toUpperCase() + gap.label.slice(1))}</dt><dd>${esc(gap.effect || '')}</dd>`).join('');
   q('gapsSection').hidden = gaps.length === 0;
   q('notes').textContent = sm.notes || '';
+}
+
+const OVERVIEW = HEAD + `
+  <div class="lead" data-r="lead">
+    <p class="head" data-r="head"></p>
+    <p class="sub" data-r="sub"></p>
+  </div>
+  <p class="totals" data-r="totals"></p>
+  <section>
+    <h3>Which workflows matter</h3>
+    <p class="why">The workflows with the most spend a rule, a script or a cache could replace come first. Open one to see its map and what to do first.</p>
+    <p class="keys" aria-hidden="true"><span class="key"><b></b>Spend</span><span class="key"><b class="rep"></b>Could be replaced</span></p>
+    <table class="tbl wfs" data-r="workflows">
+      <thead><tr><th>Workflow</th><th class="barh"><span class="sr">Spend that could be replaced</span></th><th class="num">Spend</th><th class="num">Could be replaced</th><th>Findings</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="why">Each call belongs to one workflow, so the rows add up to the totals above.</p>
+  </section>`;
+
+// the dataset's headline, by the same rules as a workflow's: the share first under $50
+function renderOverviewLead(q, o) {
+  const t = o.totals || {}, n = plural((o.workflows || []).length, 'workflow');
+  const what = 'a rule, a script or a cache could replace';
+  const found = `from ${plural(t.findings, 'finding')}, each call counted once`;
+  if (!t.spend) {
+    q('head').textContent = `No cost is recorded in this dataset, so the report can’t say how much of it went to calls ${what}.`;
+    q('sub').textContent = '';
+  } else if (!t.replaceable) {
+    q('head').textContent = `The report found no calls in this dataset that ${what}.`;
+    q('sub').textContent = `Its ${n} cost ${money(t.spend)}.`;
+  } else if (t.replaceable >= 50) {
+    q('head').innerHTML = `<b>${money(t.replaceable)}</b> of the ${money(t.spend)} this dataset cost went to calls ${what}.`;
+    q('sub').textContent = `That is ${pct(t.replaceable, t.spend)} of the spend across ${n}, ${found}.`;
+  } else {
+    q('head').innerHTML = `<b>${pct(t.replaceable, t.spend)}</b> of this dataset’s spend went to calls ${what}.`;
+    q('sub').textContent = `${money(t.replaceable)} of ${money(t.spend)} across ${n}, ${found}.`;
+  }
+}
+
+function renderOverviewRows(q, o) {
+  const rows = o.workflows || [], labels = o.risk_labels || {};
+  const max = Math.max(0, ...rows.map(r => r.spend || 0));
+  const w = v => max ? 100 * (v || 0) / max : 0;
+  q('workflows').querySelector('tbody').innerHTML = rows.map(r => `<tr>
+      <td><button class="link open-wf" type="button" data-wf="${esc(r.name)}">${stepName(r.name)}</button><span class="note">${plural(r.runs, 'run')}</span></td>
+      <td class="barcell"><div class="spendbar"><i style="width:${w(r.spend)}%"></i><i class="rep" style="width:${w(r.replaceable)}%"></i></div></td>
+      <td class="num" data-label="Spend">${money(r.spend)}</td>
+      <td class="num" data-label="Could be replaced">${money(r.replaceable)}<span class="note">${r.spend ? pct(r.replaceable || 0, r.spend) : ''}</span></td>
+      <td data-label="Findings">${count(r.findings)}${r.highest_risk ? `<span class="note">${esc(labels[r.highest_risk] || r.highest_risk)}</span>` : ''}</td></tr>`).join('');
+}
+
+function renderOverview(root, data, { name = '', meta = [], showEvent = null, workflow = null } = {}) {
+  const o = data.overview;
+  // redraw `root`, keeping what the host added: its buttons in .tools and anything after the sheet
+  let own = new Set();
+  const redraw = draw => {
+    const tools = [...(root.querySelector('.tools')?.childNodes || [])];
+    const after = [...root.childNodes].filter(n => n.nodeType === 1 && !own.has(n));
+    draw();
+    own = new Set(root.childNodes);
+    root.querySelector('.tools').append(...tools);
+    root.append(...after);
+  };
+  const overview = (from = null) => redraw(() => {
+    root.innerHTML = OVERVIEW;
+    const q = k => root.querySelector(`[data-r="${k}"]`);
+    renderHead(q, data.grade, name, meta);
+    renderOverviewLead(q, o);
+    const runs = (o.workflows || []).reduce((n, r) => n + (r.runs || 0), 0);
+    q('totals').innerHTML = `${money(o.totals?.spend)} <span class="k">across</span> ${plural(runs, 'run')} <span class="k">in</span> ${plural((o.workflows || []).length, 'workflow')}.`;
+    renderOverviewRows(q, o);
+    q('workflows').addEventListener('click', e => {
+      const b = e.target.closest('button[data-wf]');
+      if (b) show(b.dataset.wf);
+    });
+    if (from != null) [...root.querySelectorAll('button[data-wf]')].find(b => b.dataset.wf === from)?.focus();
+  });
+  const show = wf => {
+    if (!data.reports[wf]) return;
+    redraw(() => {
+      renderReport(root, data.reports[wf], { name: wf, meta: [plainName(name), ...meta].filter(Boolean), showEvent });
+      const back = root.querySelector('[data-r="back"]');
+      back.hidden = false;
+      back.addEventListener('click', () => overview(wf));
+    });
+    root.querySelector('[data-r="name"]').focus({ preventScroll: true });
+    root.scrollIntoView({ block: 'start' });
+  };
+  if (workflow && data.reports[workflow]) show(workflow); else overview();
+  return { show, overview: () => overview() };
+}
+
+function render(root, data, opts = {}) {
+  if (data && data.overview && data.reports) return renderOverview(root, data, opts);
+  renderReport(root, data, opts);
+  return { show() {}, overview() {} };
 }
 
 window.ProfilerReport = { render };
