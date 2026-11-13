@@ -72,6 +72,8 @@
 .sheet .mapbox .edge-n { fill: var(--ink); font-size: 12px; font-family: var(--mono); font-variant-numeric: tabular-nums; paint-order: stroke; stroke: var(--sheet); stroke-width: 5px; stroke-linejoin: round; }
 .sheet .mapbox .arrow { fill: var(--edge); }
 .sheet .mapbox .arrow.hot { fill: var(--estimate); }
+.sheet .mapbox .more { margin-top: 10px; font-size: 14px; color: var(--ink-2); }
+.sheet .mapbox .more .link { min-height: 44px; padding: 0 4px; }
 .sheet .mapbox .legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 14px; font-size: 14px; color: var(--ink-2); }
 .sheet .mapbox .sw { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 6px; border: 1.5px solid; }
 .sheet .mapbox .sw.llm { background: var(--pseudo); border-color: var(--carbon); }
@@ -125,7 +127,7 @@
 .sheet .card .btn-map:hover { background: var(--pseudo); }
 .sheet section.first .nothing { color: var(--ink-2); max-width: 70ch; margin-top: 8px; }
 .sheet .tbl tr.hl td { background: var(--estimate-bg); }
-@media print { .sheet .card .btn-map { display: none; } }
+@media print { .sheet .card .btn-map, .sheet .mapbox .more .link { display: none; } }
 
 /* where the money went */
 .sheet .keys { margin-top: 12px; font-size: 14px; color: var(--ink-2); }
