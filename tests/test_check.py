@@ -119,4 +119,4 @@ def test_check_writes_nothing_and_opens_no_connection(tmp_path, capsys, monkeypa
 
 @pytest.mark.parametrize("prices", ["1,2,3", "x,1", "-1,2"])
 def test_bad_prices_are_refused(tmp_path, prices):
-    assert main(["check", str(_log(tmp_path)), "--prices", prices]) == 1
+    assert main(["check", str(_log(tmp_path)), f"--prices={prices}"]) == 1
