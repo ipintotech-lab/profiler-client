@@ -65,6 +65,9 @@
 .sheet .mapbox .node.end rect { fill: var(--paper); stroke: var(--ink-2); stroke-dasharray: 4 3; }
 .sheet .mapbox .node.end text { fill: var(--ink-2); font-size: 13px; font-weight: 600; }
 .sheet .mapbox .edge { fill: none; stroke: var(--edge); stroke-linecap: round; }
+.sheet .mapbox .band rect { fill: var(--paper); stroke: var(--rule); }
+.sheet .mapbox .band text { fill: var(--ink); font-size: 14px; font-weight: 600; }
+.sheet .mapbox .band .k { fill: var(--ink-2); font-weight: 400; }
 .sheet .mapbox .edge.hot { stroke: var(--estimate); }
 .sheet .mapbox .edge-n { fill: var(--ink); font-size: 12px; font-family: var(--mono); font-variant-numeric: tabular-nums; paint-order: stroke; stroke: var(--sheet); stroke-width: 5px; stroke-linejoin: round; }
 .sheet .mapbox .arrow { fill: var(--edge); }

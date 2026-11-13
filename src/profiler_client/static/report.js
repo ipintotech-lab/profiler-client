@@ -114,9 +114,32 @@ function renderMap(q, data) {
     q('mapWhy').textContent = '';
     return new Map();
   }
-  // the most-taken links (the server lists them most-taken first) and the steps they join
-  const links = graph.edges.slice(0, MAP_LINKS), joined = new Set(links.flatMap(e => [e.from, e.to]));
-  const byId = new Map(graph.nodes.map(n => [n.id, n])), shown = graph.nodes.filter(n => joined.has(n.id));
+  const byId = new Map(graph.nodes.map(n => [n.id, n]));
+  // a workflow that runs through more than one agent is drawn in bands, one per agent, in the order runs reach them
+  const agents = [], seen = new Set(['@prompt']), queue = ['@prompt'];
+  const meet = id => { const a = byId.get(id)?.agent; if (a && !agents.includes(a)) agents.push(a); };
+  while (queue.length) {
+    const id = queue.shift();
+    meet(id);
+    for (const e of graph.edges) if (e.from === id && !seen.has(e.to)) { seen.add(e.to); queue.push(e.to); }
+  }
+  graph.nodes.forEach(n => meet(n.id));  // agents no run reaches from the prompt come last
+  const banded = agents.length > 1;
+  // the prompt opens the first band; the reply closes the band of the step that replies most
+  const bandOf = id => !banded || id === '@prompt' ? 0
+    : id === '@reply' ? bandOf(graph.edges.find(e => e.to === '@reply')?.from)
+    : Math.max(0, agents.indexOf(byId.get(id)?.agent));
+  const handoff = e => bandOf(e.from) !== bandOf(e.to);
+  // the most-taken links (the server lists them most-taken first) and the steps they join;
+  // in bands, every handoff and the most-taken links inside each band
+  const inBand = new Map();
+  const links = graph.edges.filter(e => {
+    if (handoff(e)) return true;
+    const b = bandOf(e.from), n = inBand.get(b) || 0;
+    inBand.set(b, n + 1);
+    return n < MAP_LINKS;
+  });
+  const joined = new Set(links.flatMap(e => [e.from, e.to])), shown = graph.nodes.filter(n => joined.has(n.id));
   const marks = marksOf(data, new Map(shown.map(n => [n.id, n])));
 
   // names: a pseudonymous step is "Tool A", "Tool B"… (most-called first); an LLM call is "after" what it read
@@ -134,30 +157,53 @@ function renderMap(q, data) {
   };
 
   // places: walk out from the prompt along the busiest links; a step sits right of what started it,
-  // and the LLM call that reads a first-row step's result sits under it
-  const at = new Map(), taken = new Set(), key = (c, r) => `${c},${r}`;
-  const put = (id, c, r) => { while (taken.has(key(c, r))) r++; at.set(id, { c, r }); taken.add(key(c, r)); };
-  const starts = shown.filter(n => n.kind === 'start' || !links.some(e => e.to === n.id && e.from !== n.id));
-  const queue = [];
-  for (const n of starts.filter(n => n.id !== '@reply')) { put(n.id, 0, at.size ? Math.max(...[...at.values()].map(p => p.r)) + 1 : 0); queue.push(n.id); }
-  while (queue.length) {
-    const id = queue.shift(), p = at.get(id);
-    for (const e of links.filter(e => e.from === id && e.to !== '@reply' && !at.has(e.to))) {
-      if (e.kind === 'reads_result' && p.r === 0) put(e.to, p.c, 1); else put(e.to, p.c + 1, p.r);
-      queue.push(e.to);
+  // and the LLM call that reads a first-row step's result sits under it. In bands, each band is laid
+  // out the same way from where runs enter it, and the bands stack top to bottom
+  const place = (ids, inner) => {
+    const at = new Map(), taken = new Set(), key = (c, r) => `${c},${r}`;
+    const put = (id, c, r) => { while (taken.has(key(c, r))) r++; at.set(id, { c, r }); taken.add(key(c, r)); };
+    const mine = shown.filter(n => ids.has(n.id));
+    const starts = mine.filter(n => n.kind === 'start' || !inner.some(e => e.to === n.id && e.from !== n.id));
+    const queue = [];
+    for (const n of starts.filter(n => n.id !== '@reply')) { put(n.id, 0, at.size ? Math.max(...[...at.values()].map(p => p.r)) + 1 : 0); queue.push(n.id); }
+    while (queue.length) {
+      const id = queue.shift(), p = at.get(id);
+      for (const e of inner.filter(e => e.from === id && e.to !== '@reply' && !at.has(e.to))) {
+        if (e.kind === 'reads_result' && p.r === 0) put(e.to, p.c, 1); else put(e.to, p.c + 1, p.r);
+        queue.push(e.to);
+      }
     }
+    for (const n of mine) if (!at.has(n.id) && n.id !== '@reply') put(n.id, 0, Math.max(0, ...[...at.values()].map(p => p.r)) + 1);
+    if (ids.has('@reply')) put('@reply', Math.max(0, ...[...at.values()].map(p => p.c)), 0);
+    return at;
+  };
+  const at = new Map(), bands = [];
+  for (let b = 0, row = 0; b < (banded ? agents.length : 1); b++) {
+    const ids = new Set([...joined].filter(id => bandOf(id) === b));
+    if (!ids.size) continue;
+    const local = place(ids, links.filter(e => !handoff(e) && ids.has(e.from)));
+    const rows = Math.max(...[...local.values()].map(p => p.r)) + 1;
+    for (const [id, p] of local) at.set(id, { c: p.c, r: p.r + row, b: bands.length });
+    bands.push({ agent: agents[b], r0: row, r1: row + rows - 1 });
+    row += rows;
   }
-  for (const n of shown) if (!at.has(n.id) && n.id !== '@reply') put(n.id, 0, Math.max(0, ...[...at.values()].map(p => p.r)) + 1);
-  if (joined.has('@reply')) put('@reply', Math.max(...[...at.values()].map(p => p.c)), 0);
 
-  const W = 172, H = 68, PW = 96, PH = 44, CX = 236, RY = 200, PAD = 16, TOP = 40;
+  const W = 172, H = 68, PW = 96, PH = 44, CX = 236, RY = 200, PAD = 16, TOP = 40, HEAD = banded ? 36 : 0;
+  const rowY = (r, b) => TOP + r * RY + (b + 1) * HEAD;  // a band's name sits above its first row
   const box = id => {
-    const { c, r } = at.get(id), end = MAP_END[id], w = end ? PW : W, h = end ? PH : H;
-    const x = PAD + c * CX + (W - w) / 2, y = TOP + r * RY + (H - h) / 2;
+    const { c, r, b } = at.get(id), end = MAP_END[id], w = end ? PW : W, h = end ? PH : H;
+    const x = PAD + c * CX + (W - w) / 2, y = rowY(r, b) + (H - h) / 2;
     return { x, y, w, h, cx: x + w / 2, cy: y + h / 2 };
   };
   const cols = Math.max(...[...at.values()].map(p => p.c)) + 1, rows = Math.max(...[...at.values()].map(p => p.r)) + 1;
-  const width = PAD * 2 + (cols - 1) * CX + W, height = TOP + (rows - 1) * RY + H + 56;
+  const width = PAD * 2 + (cols - 1) * CX + W, height = rowY(rows - 1, bands.length - 1) + H + 56;
+  const bandRects = banded ? bands.map((band, b) => {
+    const y = rowY(band.r0, b) - 48, h = rowY(band.r1, b) + H + 18 - y;
+    return `<g class="band"><rect x="${PAD / 2}" y="${y}" width="${width - PAD}" height="${h}" rx="8"/>` +
+      // top right: runs enter a band in its first column, so the handoff arrows come in on the left
+      `<text x="${width - PAD}" y="${y + 22}" text-anchor="end"><tspan class="k">Agent ${b + 1} of ${bands.length}</tspan> ${esc(plainName(band.agent))}` +
+      `${HAS_HASH.test(band.agent) ? `<title>${esc(band.agent)}</title>` : ''}</text></g>`;
+  }) : [];
 
   const total = data.summary?.totals?.cost || shown.reduce((s, n) => s + n.cost, 0);
   const hot = shown.filter(n => n.cost > 0).sort((a, b) => b.cost - a.cost)[0];
@@ -174,6 +220,13 @@ function renderMap(q, data) {
     const a = box(e.from), b = box(e.to), w = 1.5 + 8 * e.transition_count / max;
     const { c: ca, r: ra } = at.get(e.from), { c: cb, r: rb } = at.get(e.to);
     const isHot = hot && e.to === hot.id && e.kind === 'reads_result';
+    if (handoff(e)) {  // to the next agent's band: out of the bottom, into the top, labelled with the runs that took it
+      const down = b.y > a.y, x1 = a.cx, y1 = down ? a.y + a.h : a.y, x2 = b.cx, y2 = down ? b.y - 2 : b.y + b.h + 2, mid = (y1 + y2) / 2;
+      const from = agents[bandOf(e.from)], to = agents[bandOf(e.to)];
+      return `<path class="edge handoff" d="M${x1},${y1} C${x1},${mid} ${x2},${mid} ${x2},${y2}" stroke-width="${w.toFixed(1)}" marker-end="url(#mapArrow)">` +
+        `<title>${esc(plainName(from))} hands over to ${esc(plainName(to))}: ${esc(label(e.from))} → ${esc(label(e.to))} in ${esc(plural(e.distinct_run_count, 'run'))}</title></path>` +
+        `<text class="edge-n" x="${(x1 + x2) / 2 + 8}" y="${mid + 4}">${esc(plural(e.distinct_run_count, 'run'))}</text>`;
+    }
     let d, lx, ly, anchor = 'middle';
     if (ca === cb) {  // same column: down on the left, up on the right
       const down = b.y > a.y, x = a.cx + (down ? -30 : 30);
@@ -214,10 +267,10 @@ function renderMap(q, data) {
   });
   const present = Object.keys(MARK).filter(k => [...marks.values()].some(m => m.kinds.has(k)));
   q('map').innerHTML = (present.length ? `<p class="legend marks">${present.map(k => `<span><i class="pill ${k}">${esc(MARK[k].badge)}</i>${esc(MARK[k].legend)}</span>`).join('')}` +
-    '<span>Select a marked step to see its rows in the table</span></p>' : '') + `<div class="mapscroll"><svg viewBox="0 0 ${width} ${height}" style="min-width:${Math.min(width, 720)}px" role="img" aria-label="${esc(`Workflow map: ${plural(shown.length, 'step')} and ${plural(paths.length, 'link')} across ${plural(graph.run_count, 'run')}`)}">` +
+    '<span>Select a marked step to see its rows in the table</span></p>' : '') + `<div class="mapscroll"><svg viewBox="0 0 ${width} ${height}" style="min-width:${Math.min(width, 720)}px" role="img" aria-label="${esc(`Workflow map: ${plural(shown.length, 'step')}${banded ? ` in ${plural(bands.length, 'agent')}` : ''} and ${plural(paths.length, 'link')} across ${plural(graph.run_count, 'run')}`)}">` +
     `<defs><marker id="mapArrow" ${ARROW}><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker>` +
     `<marker id="mapArrowHot" ${ARROW}><path class="arrow hot" d="M0,0 L10,5 L0,10 z"/></marker></defs>` +
-    paths.join('') + nodes.join('') + '</svg></div>' +
+    bandRects.join('') + paths.join('') + nodes.join('') + '</svg></div>' +
     '<p class="legend kinds"><span><i class="sw llm"></i>LLM call (has a cost)</span><span><i class="sw tool"></i>Tool call</span>' +
     (hot && total ? `<span><i class="sw hot"></i>Largest share of spend (${Math.round(100 * hot.cost / total)}%)</span>` : '') + '</p>';
 
@@ -231,7 +284,8 @@ function renderMap(q, data) {
   };
   const branches = shown.filter(n => (out.get(n.id) || []).length > 1)
     .map(n => `${name(n.id)} goes ${out.get(n.id).length} ways: it ${out.get(n.id).map(e => way(n, e)).join(', ')}. `).join('');
-  q('mapWhy').textContent = branches + (left ? `This shows the ${count(links.length)} most-taken of ${plural(graph.edges.length, 'link')}; ${plural(unlinked, 'step')} ${unlinked === 1 ? 'is' : 'are'} left out, and all are in the table below. ` : '') +
+  const handoffs = banded ? `Each band is one agent, in the order runs reach them; a link from one band to the next is a handoff, labelled with how many runs took it. ` : '';
+  q('mapWhy').textContent = handoffs + branches + (left ? `This shows the ${count(links.length)} most-taken of ${plural(graph.edges.length, 'link')}; ${plural(unlinked, 'step')} ${unlinked === 1 ? 'is' : 'are'} left out, and all are in the table below. ` : '') +
     `Arrow width is how many times a hop happened across ${plural(graph.run_count, 'run')}; where a step goes more than one way, the % is that way's share. Links come from the trace: an LLM call choosing a tool, the tool whose result the next LLM call read, the prompt that started a run, and the LLM call that replied. Where a trace doesn't record which LLM call chose a tool or read its result (OpenTelemetry traces often don't), the link is taken from the order the calls ran in within one run.`;
   return marks;
 }
