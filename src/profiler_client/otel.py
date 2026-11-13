@@ -18,11 +18,22 @@ frameworks emit:
   choice (``traceloop.entity.output``), like a decision in an event log.
 
 Other spans (agents, chains, HTTP) only give structure and are skipped.
-Within a trace, an LLM call's trigger is the tools that ran since the
-previous LLM call, and its selection the tools that run until the next.
-A tool span's ``parent`` is its own parent span when that is an LLM or tool
-call; when it is a skipped span (an agent or chain), the parent is the LLM
-call that selected the tool, so the map can still draw which call chose it.
+Within an agent -- the spans under one agent span (``invoke_agent``, or
+span kind ``AGENT``), or the whole trace when there is none -- an LLM
+call's trigger is the tools that ran since the agent's previous LLM call,
+and its selection the tools that run until the next. Agents running side
+by side so don't mix their calls. A tool span's ``parent`` is its own
+parent span when that is an LLM or tool call; when it is a skipped span
+(an agent or chain), the parent is the LLM call that selected the tool, so
+the map can still draw which call chose it.
+
+Handoffs between agents: the first call in an agent span gets as parent
+the call that handed over to it -- the span the agent span links to
+(OTLP ``links``), else the enclosing agent's latest LLM call -- and an
+agent's first LLM call is triggered by it. A call that names no agent takes
+its agent span's ``gen_ai.agent.name``. When agents return, the next
+LLM call of the agent they returned to is also triggered by each one's
+last tool (not by an agent that handed over to another).
 
 Service, workflow, agent and tool names are pseudonyms unless
 ``--keep-names``; ids, arguments, results and error messages always are.
@@ -132,27 +143,99 @@ def _name_decision(llm: dict, names: Names, step: str, given: Any, chose: Any) -
         llm["result"] = f"success:{names.token('output', chose)}"
 
 
+def _is_agent(attrs: dict) -> bool:
+    span_kind = str(attrs.get("openinference.span.kind") or attrs.get("traceloop.span.kind") or "").upper()
+    return attrs.get("gen_ai.operation.name") == "invoke_agent" or span_kind == "AGENT"
+
+
+class _Agent:
+    """What one agent span (``None``: the trace outside any) has done so far."""
+
+    def __init__(self, span: dict | None, name: Any, outer: str | None) -> None:
+        self.span = span or {}
+        self.name = name  # its ``gen_ai.agent.name``, for calls that don't record one
+        self.outer = outer  # the enclosing agent span's id
+        self.llm: dict | None = None
+        self.trigger_parts: set[str] = set()
+        self.last_tool: str | None = None
+        self.started = False  # has its first call been seen
+        self.handed_over = False  # it handed the work to another agent instead of returning
+        self.returned: list[str] = []  # agents inside it, in the order they started
+
+
+class _Trace:
+    """One trace's agent spans and the events converted so far."""
+
+    def __init__(self, kept: dict[str, dict], others: dict[str, tuple[dict, dict]]) -> None:
+        self.kept = kept  # converted spans by id
+        self.others = others  # skipped spans by id, with their attributes
+        self.agents: dict[str | None, _Agent] = {}
+        self.events_by_span: dict[str, dict] = {}
+
+    def agent_of(self, span_id: str | None) -> str | None:
+        """The id of the agent span ``span_id`` sits in (itself, if it is one)."""
+        seen: set[str] = set()
+        while span_id and span_id not in seen:
+            seen.add(span_id)
+            if span_id in self.others:
+                span, attrs = self.others[span_id]
+                if _is_agent(attrs):
+                    return span_id
+                span_id = span.get("parentSpanId")
+            elif span_id in self.kept:
+                span_id = self.kept[span_id].get("parentSpanId")
+            else:
+                return None
+        return None
+
+    def state(self, agent_id: str | None) -> _Agent:
+        if agent_id not in self.agents:
+            span, attrs = self.others[agent_id] if agent_id else (None, {})
+            outer = self.agent_of(span.get("parentSpanId")) if span else None
+            self.agents[agent_id] = _Agent(span, _first(attrs, "gen_ai.agent.name"), outer)
+            if agent_id:
+                self.state(outer).returned.append(agent_id)
+        return self.agents[agent_id]
+
+    def handoff(self, here: _Agent) -> dict | None:
+        """The call that handed over to this agent: its link, else the
+        enclosing agent's latest LLM call."""
+        for link in here.span.get("links") or []:
+            if isinstance(link, dict) and link.get("spanId") in self.events_by_span:
+                from_agent = self.agent_of(link["spanId"])
+                if from_agent != here.outer and from_agent in self.agents:
+                    self.agents[from_agent].handed_over = True
+                return self.events_by_span[link["spanId"]]
+        return self.state(here.outer).llm if here.span else None
+
+
 def convert_otel_export(rows: list[dict], names: Names) -> Conversion:
     namer = Namer(names)
     by_trace: dict[str, list] = defaultdict(list)
+    skipped: dict[str, dict[str, tuple[dict, dict]]] = defaultdict(dict)  # trace -> span id -> (span, attrs)
     for resource, attrs, span, where in _spans(rows):
         kind = _kind(attrs)
         if kind:
             by_trace[span["traceId"]].append((int(span.get("startTimeUnixNano") or 0), kind, resource, attrs, span,
                                               where))
+        elif span.get("spanId"):
+            skipped[span["traceId"]][span["spanId"]] = (span, attrs)
 
     events: list[dict] = []
     traces_with_cost: set[str] = set()
     for trace_id, spans in by_trace.items():
         spans.sort(key=lambda s: s[0])
-        llm: dict | None = None
-        trigger_parts: set[str] = set()
         kept = {s[4].get("spanId") for s in spans}
+        trace = _Trace({s[4]["spanId"]: s[4] for s in spans if s[4].get("spanId")}, skipped.get(trace_id, {}))
         for start, kind, resource, attrs, span, where in spans:
+            here = trace.state(trace.agent_of(span.get("parentSpanId")))
+            llm, trigger_parts = here.llm, here.trigger_parts
+            first, here.started = not here.started, True
+            source = trace.handoff(here) if first else None
             end = int(span.get("endTimeUnixNano") or 0)
             conversation = _first(attrs, "gen_ai.conversation.id", "session.id")
             workflow = _first(attrs, "traceloop.workflow.name") or _first(resource, "service.name") or "otel"
-            agent = _first(attrs, "gen_ai.agent.name")
+            agent = _first(attrs, "gen_ai.agent.name") or here.name
             error = (span.get("status") or {}).get("code") in (_ERROR, "STATUS_CODE_ERROR")
             event = {
                 "trace_id": names.token("id", conversation or trace_id),
@@ -164,9 +247,18 @@ def convert_otel_export(rows: list[dict], names: Names) -> Conversion:
                 "latency_ms": (end - start) / 1e6 if end > start else 0.0,
                 "_source": where,
             }
+            if source is not None:
+                event["parent"] = source["event_id"]
             if kind == "llm":
-                trigger = " + ".join(sorted(trigger_parts)) or "user_prompt"
-                trigger_parts = set()
+                for inner_id in here.returned:
+                    inner = trace.agents[inner_id]
+                    ended = int(inner.span.get("endTimeUnixNano") or 0) <= start
+                    if ended and inner.last_tool and not inner.handed_over:
+                        trigger_parts.add(inner.last_tool)
+                here.returned = [a for a in here.returned
+                                 if int(trace.agents[a].span.get("endTimeUnixNano") or 0) > start]
+                trigger = " + ".join(sorted(trigger_parts)) or (source["node"] if source else "user_prompt")
+                here.trigger_parts = set()
                 finish = _first(attrs, "gen_ai.response.finish_reasons")
                 finish = finish[0] if isinstance(finish, list) and finish else finish
                 cost = _first(attrs, "gen_ai.usage.cost", "llm.cost.total")
@@ -197,6 +289,9 @@ def convert_otel_export(rows: list[dict], names: Names) -> Conversion:
                     llm["cost"] = float(cost)
                     traces_with_cost.add(event["trace_id"])
                 events.append(llm)
+                here.llm = llm
+                if span.get("spanId"):
+                    trace.events_by_span[span["spanId"]] = llm
                 continue
             name = str(_first(attrs, "gen_ai.tool.name", "tool.name") or span.get("name") or "unknown")
             args = _parsed(_first(attrs, "gen_ai.tool.call.arguments", "tool.parameters", "input.value",
@@ -214,9 +309,9 @@ def convert_otel_export(rows: list[dict], names: Names) -> Conversion:
                 result = f"error:{names.token('output', (span.get('status') or {}).get('message'))}"
             else:
                 result = "no_result"
-            if llm is not None and span.get("parentSpanId") not in kept:
+            if llm is not None and span.get("parentSpanId") not in kept and source is None:
                 event["parent"] = llm["event_id"]
-            events.append({
+            tool_event = {
                 **event,
                 "event_type": "tool_call",
                 "node": node,
@@ -225,8 +320,12 @@ def convert_otel_export(rows: list[dict], names: Names) -> Conversion:
                 "input_state": {"input": names.token("input", args)} if args is not None else {},
                 "input_complete": args is not None,
                 "result": result,
-            })
+            }
+            events.append(tool_event)
+            if span.get("spanId"):
+                trace.events_by_span[span["spanId"]] = tool_event
             trigger_parts.add(node + (" (error)" if error else ""))
+            here.last_tool = node
             if llm is not None:
                 llm["_tools"].append(node)
                 if llm["decision"]["type"] == "next_action":

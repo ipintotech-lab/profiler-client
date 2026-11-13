@@ -444,3 +444,76 @@ def test_contract_v1_datasets_are_still_read_and_a_bad_relation_is_refused(tmp_p
         read_sealed(json.dumps({"profiler_client_seal": bad}).encode() + b"\n" + body)
     with pytest.raises(PrepareError, match="SEAL_UNSUPPORTED"):
         read_sealed(json.dumps({"profiler_client_seal": {**seal, "contract_version": "3"}}).encode() + b"\n" + body)
+
+
+def _agents_trace():
+    """A supervisor decision forks two agents that run side by side and
+    interleave; ``kyc`` hands over to ``docs`` instead of returning; then the
+    supervisor decides again."""
+    ns = 1_000_000
+
+    def span(span_id, parent, start, end, attrs, links=None):
+        out = {"traceId": "t-acme", "spanId": span_id, "parentSpanId": parent, "name": span_id,
+               "startTimeUnixNano": str(start * ns), "endTimeUnixNano": str(end * ns),
+               "attributes": [_attr(k, v) for k, v in attrs.items()], "status": {}}
+        if links:
+            out["links"] = [{"traceId": "t-acme", "spanId": s} for s in links]
+        return out
+
+    def agent(span_id, name, start, end, links=None):
+        attrs = {"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": name}
+        return span(span_id, None if span_id == "root" else "root", start, end, attrs, links)
+
+    def llm(span_id, parent, at, decision=None):
+        attrs = {"gen_ai.operation.name": "chat", "gen_ai.request.model": "m"}
+        if decision:
+            attrs.update({"traceloop.entity.name": decision, "traceloop.entity.input": '{"case": 1}',
+                          "traceloop.entity.output": '"next"'})
+        return span(span_id, parent, at, at + 1, attrs)
+
+    def tool(span_id, parent, at):
+        return span(span_id, parent, at, at + 1, {"gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": span_id})
+
+    spans = [
+        agent("root", "supervisor", 0, 100),
+        llm("route", "root", 1, decision="route"),
+        agent("fraud", "fraud", 3, 20, links=["route"]), agent("credit", "credit", 3, 30, links=["route"]),
+        llm("f1", "fraud", 3), llm("c1", "credit", 4),
+        tool("risk_score", "fraud", 6), tool("get_credit_score", "credit", 7),
+        llm("f2", "fraud", 9), tool("place_hold", "fraud", 11),
+        llm("c2", "credit", 12), tool("get_affordability", "credit", 14),
+        agent("kyc", "kyc", 40, 45), llm("k1", "kyc", 40), tool("kyc_lookup", "kyc", 42),
+        agent("docs", "docs", 46, 50, links=["kyc_lookup"]), llm("d1", "docs", 46), tool("validate", "docs", 48),
+        llm("join", "root", 60, decision="join"),
+    ]
+    return [{"resourceSpans": [{"resource": {"attributes": [_attr("service.name", "acme")]},
+                                "scopeSpans": [{"spans": spans[::-1]}]}]}]  # out of time order on purpose
+
+
+def test_otel_agents_running_side_by_side_keep_their_own_links_and_triggers():
+    from profiler_client.otel import convert_otel_export
+
+    events = convert_otel_export(_agents_trace(), Names(Pseudonymizer(new_key()), keep=True)).events
+    by_id = {e["event_id"]: e for e in events}
+    agent_of = {e["event_id"]: e["agent"] for e in events}
+    named = {e["node"]: e for e in events if e["node"] in ("route", "join")}
+    first = {}
+    for e in events:
+        first.setdefault(e["agent"], e)
+    # the decision starts both branches, and neither branch links into the other
+    assert first["fraud"]["parent"] == first["credit"]["parent"] == named["route"]["event_id"]
+    for e in events:
+        if e.get("parent") in by_id and e is not first[e["agent"]]:
+            assert agent_of[e["parent"]] == e["agent"], e
+    # an agent's call reads only its own agent's tools; its tools hang under its own call
+    triggers = {e["agent"]: [x["trigger"] for x in events if x["agent"] == e["agent"] and x["event_type"] == "decision"]
+                for e in events}
+    assert triggers["fraud"] == ["route", "risk_score"]
+    assert triggers["credit"] == ["route", "get_credit_score"]
+    tools = {e["node"]: by_id[e["parent"]] for e in events if e["event_type"] == "tool_call"}
+    assert tools["place_hold"]["agent"] == "fraud" and tools["get_affordability"]["agent"] == "credit"
+    assert tools["place_hold"]["decision"]["selected"] == "place_hold"
+    # the agent kyc hands to starts from kyc's last step
+    assert first["docs"]["parent"] == next(e for e in events if e["node"] == "kyc_lookup")["event_id"]
+    # the next decision read every branch that returned, not one that handed over
+    assert named["join"]["trigger"] == "get_affordability + place_hold + validate"
