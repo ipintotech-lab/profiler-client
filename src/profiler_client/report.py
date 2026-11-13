@@ -133,7 +133,24 @@ def _list(value: Any) -> list:
 
 def view(report: dict) -> dict:
     """Only the fields report.js draws. The page holds restored names, and a finding's
-    matched inputs (``inputs``, ``groups``) are never drawn, so they are never written."""
+    matched inputs (``inputs``, ``groups``) are never drawn, so they are never written.
+    A dataset overview keeps its rows and each workflow's report, each viewed the same way."""
+    overview, reports = report.get("overview"), report.get("reports")
+    if isinstance(overview, dict) and isinstance(reports, dict):
+        return {
+            "overview": {
+                "workflows": [_pick(r, ("name", "runs", "spend", "replaceable", "share", "findings", "highest_risk"))
+                              for r in _list(overview.get("workflows")) if isinstance(r, dict)],
+                "totals": _pick(overview.get("totals"), ("spend", "replaceable", "share", "findings")),
+                **_pick(overview, ("risk_labels",)),
+            },
+            "reports": {name: _workflow_view(r) for name, r in reports.items() if isinstance(r, dict)},
+            "grade": _pick(report.get("grade"), ("grade", "word")) or None,
+        }
+    return _workflow_view(report)
+
+
+def _workflow_view(report: dict) -> dict:
     summary = _pick(report.get("summary"), ("totals", "notes", "replaceable", "risk_labels"))
     if "next_steps" in _pick(report.get("summary"), ("next_steps",)):
         summary["next_steps"] = [

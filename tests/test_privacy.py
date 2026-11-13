@@ -454,3 +454,30 @@ def test_a_report_without_next_steps_draws_no_cards():
     # an older or diagnose-mode report: the renderer hides "do these first" when next_steps is absent
     assert "next_steps" not in view({"summary": {"totals": {"cost": 1}}})["summary"]
     assert view({"summary": {"next_steps": []}})["summary"]["next_steps"] == []
+
+
+def test_open_keeps_an_overviews_rows_and_each_workflows_report_with_names_restored(tmp_path, monkeypatch):
+    # a dataset overview: rows and reports keyed by workflow name, restored alike; a report's input slices stay out
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    payload_hash, wf_token, value_token = "c" * 64, "h:" + "6" * 64, "h:" + "7" * 64
+    write_name_list(payload_hash, {wf_token: "fraud-screening", value_token: "private-input"},
+                    tmp_path / "profiler-client" / "names")
+    row = {"name": wf_token, "runs": 3, "spend": 2.0, "replaceable": 0.5, "share": 0.25, "findings": 1,
+           "highest_risk": "medium", "where": f"x={value_token}"}
+    report = {"summary": {"totals": {"cost": 2.0}, "next_steps": [{"step": "review", "where": f"x={value_token}"}]},
+              "observe": {"selected_workflow": wf_token, "workflows": [{"name": wf_token, "num_runs": 3}]}}
+    source = tmp_path / "overview.json"
+    source.write_text(json.dumps({"payload_sha256": payload_hash, "grade": {"grade": "B", "word": "Good"},
+                                  "overview": {"workflows": [row], "totals": {"spend": 2.0, "replaceable": 0.5},
+                                               "risk_labels": {"medium": "Needs review"}},
+                                  "reports": {wf_token: report}}))
+    page = view(json.loads(source.read_text()))
+    assert set(page) == {"overview", "reports", "grade"}
+    assert set(page["overview"]["workflows"][0]) == set(row) - {"where"}
+    assert page["reports"][wf_token]["observe"]["selected_workflow"] == wf_token
+    assert "where" not in page["reports"][wf_token]["summary"]["next_steps"][0]
+    output = tmp_path / "overview.html"
+    assert cli.main(["open", str(source), "-o", str(output)]) == 0
+    rendered = output.read_text()
+    assert rendered.count("fraud-screening") >= 3 and wf_token not in rendered
+    assert "private-input" not in rendered and value_token not in rendered
