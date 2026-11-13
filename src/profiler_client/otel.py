@@ -12,6 +12,11 @@ frameworks emit:
 * **Tool call** -- ``execute_tool`` or span kind ``TOOL``: the tool name,
   its arguments and result when the span records them.
 
+* **Named decision** -- an LLM call that records ``traceloop.entity.name``
+  (a hand-instrumented step such as a handoff) is its own node, with its
+  input (``traceloop.entity.input``, one pseudonym per field) and its
+  choice (``traceloop.entity.output``), like a decision in an event log.
+
 Other spans (agents, chains, HTTP) only give structure and are skipped.
 Within a trace, an LLM call's trigger is the tools that ran since the
 previous LLM call, and its selection the tools that run until the next.
@@ -111,6 +116,22 @@ def _kind(attrs: dict) -> str | None:
     return None
 
 
+def _name_decision(llm: dict, names: Names, step: str, given: Any, chose: Any) -> None:
+    """An LLM call the code named: the node, input and choice it recorded,
+    in place of the tools around it."""
+    node = names.step(step)
+    llm["node"] = node
+    if isinstance(given, dict):
+        llm["input_state"] = names.input_fields(given)
+    elif given is not None:
+        llm["input_state"] = {"input": names.token("input", given)}
+    llm["input_complete"] = given is not None
+    if chose is not None:
+        selected = names.steps(chose, "+") if isinstance(chose, str) else names.token("output", chose)
+        llm["decision"] = {"type": node, "selected": selected}
+        llm["result"] = f"success:{names.token('output', chose)}"
+
+
 def convert_otel_export(rows: list[dict], names: Names) -> Conversion:
     namer = Namer(names)
     by_trace: dict[str, list] = defaultdict(list)
@@ -168,6 +189,10 @@ def convert_otel_export(rows: list[dict], names: Names) -> Conversion:
                     "result": finish if finish in policy.STOP_REASONS else None,
                     "_tools": [],
                 }
+                step = _first(attrs, "traceloop.entity.name")
+                if step is not None:
+                    _name_decision(llm, names, str(step), _parsed(attrs.get("traceloop.entity.input")),
+                                   _parsed(attrs.get("traceloop.entity.output")))
                 if isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost > 0:
                     llm["cost"] = float(cost)
                     traces_with_cost.add(event["trace_id"])
@@ -204,7 +229,8 @@ def convert_otel_export(rows: list[dict], names: Names) -> Conversion:
             trigger_parts.add(node + (" (error)" if error else ""))
             if llm is not None:
                 llm["_tools"].append(node)
-                llm["decision"]["selected"] = "+".join(sorted(set(llm["_tools"])))
+                if llm["decision"]["type"] == "next_action":
+                    llm["decision"]["selected"] = "+".join(sorted(set(llm["_tools"])))
 
     cleaned = [{k: v for k, v in e.items() if v is not None and k != "_tools"} for e in events]
     traces = {e["trace_id"] for e in cleaned}
