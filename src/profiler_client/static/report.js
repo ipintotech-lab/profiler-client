@@ -276,6 +276,7 @@ const SHEET = `
       <thead><tr><th>Step</th><th class="barh"><span class="sr">Share of spend</span></th><th class="num">Cost</th><th>Repeats</th></tr></thead>
       <tbody></tbody>
     </table>
+    <p class="why">Each % is that step's share of the workflow's total spend. <code>llm_call ← X</code> is the model deciding what to do after X. A tool's cost includes the LLM calls that chose it, so those dollars also appear in the <code>llm_call</code> rows: rows overlap, and their % don't add up to 100.</p>
     <p class="why">Repeats are calls with the same input and the same result as an earlier call.</p>
   </section>
   <section data-r="gapsSection">
