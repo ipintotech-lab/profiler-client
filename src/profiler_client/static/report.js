@@ -18,6 +18,53 @@ const KIND = {
   CONDITIONAL_LLM_BYPASS: 'An LLM choice that never changes',
   REVIEW_HIDDEN_STATE: 'Same request, different results',
 };
+// "Do these first": a finding's plain title, and what the next step is called
+const TITLE = {
+  CACHE_RESULT: 'Reuse a repeated result',
+  CONDITIONAL_LLM_BYPASS: 'Replace an LLM decision with a rule',
+  EXTRACT_DETERMINISTIC_SUBSTEP: 'Script a fixed sequence',
+  DETERMINISTIC_REGION: 'Skip the LLM for one slice of inputs',
+  REVIEW_HIDDEN_STATE: 'Unstable result: find the cause',
+};
+const STEP = { replay: 'Replay', review: 'Review', declare: 'Declare', investigate: 'Investigate' };
+const EVIDENCE = {
+  CACHE_RESULT: n => `${plural(n, 'call')} had the same input and gave the same result.`,
+  CONDITIONAL_LLM_BYPASS: n => `The LLM made the same choice in all ${plural(n, 'call')}.`,
+  EXTRACT_DETERMINISTIC_SUBSTEP: n => `These steps ran in this order ${plural(n, 'time')}.`,
+  DETERMINISTIC_REGION: n => `${plural(n, 'call')} fall in this slice of inputs.`,
+  REVIEW_HIDDEN_STATE: n => `Across ${plural(n, 'call')}, the same request gave different results.`,
+};
+// what the map marks on a step a finding is about: each has its own words, never colour alone
+const MARK = {
+  unstable: { badge: 'unstable result', legend: 'the same request gave different results' },
+  replace: { badge: 'rule or script', legend: 'LLM call a rule or script could replace' },
+  repeats: { badge: 'repeats', legend: 'tool call that repeats with the same input and result' },
+};
+const LLM_AFTER = 'llm_call ← ';
+// the map steps a finding is about; scripting a sequence removes the LLM calls that chose its next steps
+const findingNodes = o => o.type === 'EXTRACT_DETERMINISTIC_SUBSTEP'
+  ? [...(o.nodes || []), ...(o.nodes || []).slice(0, -1).map(n => LLM_AFTER + n)] : (o.nodes || []);
+// a finding's row in the steps table: the step it's listed under
+const rowOf = o => (o.nodes || [o.title])[0];
+function marksOf(data, byId) {
+  const marks = new Map();
+  const add = (id, kind, o) => {
+    if (!byId.has(id)) return;
+    const m = marks.get(id) || { kinds: new Set(), rows: new Set([id]) };
+    m.kinds.add(kind);
+    m.rows.add(rowOf(o));
+    marks.set(id, m);
+  };
+  for (const o of [...(data.summary?.opportunities || []), ...(data.summary?.next_steps || [])]) {
+    const nodes = o.nodes || [];
+    if (o.type === 'REVIEW_HIDDEN_STATE') nodes.forEach(id => add(id, 'unstable', o));
+    else if (o.type === 'CACHE_RESULT') nodes.filter(id => byId.get(id)?.kind === 'step').forEach(id => add(id, 'repeats', o));
+    else if (o.type === 'EXTRACT_DETERMINISTIC_SUBSTEP') nodes.slice(0, -1).forEach(id => add(LLM_AFTER + id, 'replace', o));
+    else nodes.filter(id => byId.get(id)?.kind === 'llm_call').forEach(id => add(id, 'replace', o));  // a rule, or a rule for one slice
+  }
+  return marks;
+}
+
 // why the report can't tell whether a step's calls repeat
 const UNSURE = {
   different: { cell: 'None', note: 'every call had a different input' },
@@ -61,11 +108,12 @@ function renderMap(q, data) {
     const why = avail ? MAP_NONE[avail.code] || 'No map for this dataset.' : 'No map: this report was made before maps were added.';
     q('map').innerHTML = `<p class="none">${esc(why)}</p>`;
     q('mapWhy').textContent = '';
-    return;
+    return new Map();
   }
   // the most-taken links (the server lists them most-taken first) and the steps they join
   const links = graph.edges.slice(0, MAP_LINKS), joined = new Set(links.flatMap(e => [e.from, e.to]));
   const byId = new Map(graph.nodes.map(n => [n.id, n])), shown = graph.nodes.filter(n => joined.has(n.id));
+  const marks = marksOf(data, new Map(shown.map(n => [n.id, n])));
 
   // names: a pseudonymous step is "Tool A", "Tool B"… (most-called first); an LLM call is "after" what it read
   const letters = new Map();
@@ -147,17 +195,26 @@ function renderMap(q, data) {
     const b = box(n.id);
     if (MAP_END[n.id]) return `<g class="node end"><rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="22"/><text x="${b.cx}" y="${b.cy + 5}" text-anchor="middle">${MAP_END[n.id]}</text></g>`;
     const [t, s1, s2] = lines(n), loop = loops.get(n.id);
-    const cls = `node${n.kind === 'llm_call' ? ' llm' : ''}${hot && n.id === hot.id ? ' hot' : ''}`;
-    return `<g class="${cls}" data-node="${esc(n.id)}"><title>${esc(n.id)}</title><rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="6"/>` +
+    const kinds = Object.keys(MARK).filter(k => marks.get(n.id)?.kinds.has(k));
+    const cls = `node${n.kind === 'llm_call' ? ' llm' : ''}${hot && n.id === hot.id ? ' hot' : ''}${kinds.map(k => ` ${k}`).join('')}`;
+    let bx = b.x + 8;
+    const badges = kinds.map(k => {
+      const w = 16 + 6.2 * MARK[k].badge.length, x = bx;
+      bx += w + 6;
+      return `<g class="badge ${k}"><rect x="${x}" y="${b.y - 10}" width="${w}" height="20" rx="10"/><text x="${x + w / 2}" y="${b.y + 4}" text-anchor="middle">${esc(MARK[k].badge)}</text></g>`;
+    });
+    return `<g class="${cls}" data-node="${esc(n.id)}"${kinds.length ? ` data-marks="${kinds.map(k => MARK[k].badge).join(', ')}"` : ''}><title>${esc(n.id)}</title><rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="6"/>` +
       `<text class="t" x="${b.x + 14}" y="${b.y + 26}">${esc(t)}</text>` +
       (s1 ? `<text class="s" x="${b.x + 14}" y="${b.y + 44}">${esc(s1)}</text>` : '') +
-      `<text class="s" x="${b.x + 14}" y="${b.y + (s1 ? 59 : 50)}">${esc(s2)}${loop ? ` · ↻ ${esc(count(loop))}` : ''}</text></g>`;
+      `<text class="s" x="${b.x + 14}" y="${b.y + (s1 ? 59 : 50)}">${esc(s2)}${loop ? ` · ↻ ${esc(count(loop))}` : ''}</text>${badges.join('')}</g>`;
   });
-  q('map').innerHTML = `<div class="mapscroll"><svg viewBox="0 0 ${width} ${height}" style="min-width:${Math.min(width, 720)}px" role="img" aria-label="${esc(`Workflow map: ${plural(shown.length, 'step')} and ${plural(paths.length, 'link')} across ${plural(graph.run_count, 'run')}`)}">` +
+  const present = Object.keys(MARK).filter(k => [...marks.values()].some(m => m.kinds.has(k)));
+  q('map').innerHTML = (present.length ? `<p class="legend marks">${present.map(k => `<span><i class="pill ${k}">${esc(MARK[k].badge)}</i>${esc(MARK[k].legend)}</span>`).join('')}` +
+    '<span>Select a marked step to see its rows in the table</span></p>' : '') + `<div class="mapscroll"><svg viewBox="0 0 ${width} ${height}" style="min-width:${Math.min(width, 720)}px" role="img" aria-label="${esc(`Workflow map: ${plural(shown.length, 'step')} and ${plural(paths.length, 'link')} across ${plural(graph.run_count, 'run')}`)}">` +
     `<defs><marker id="mapArrow" ${ARROW}><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker>` +
     `<marker id="mapArrowHot" ${ARROW}><path class="arrow hot" d="M0,0 L10,5 L0,10 z"/></marker></defs>` +
     paths.join('') + nodes.join('') + '</svg></div>' +
-    '<p class="legend"><span><i class="sw llm"></i>LLM call (has a cost)</span><span><i class="sw tool"></i>Tool call</span>' +
+    '<p class="legend kinds"><span><i class="sw llm"></i>LLM call (has a cost)</span><span><i class="sw tool"></i>Tool call</span>' +
     (hot && total ? `<span><i class="sw hot"></i>Largest share of spend (${Math.round(100 * hot.cost / total)}%)</span>` : '') + '</p>';
 
   const left = graph.edges.length - links.length, unlinked = graph.nodes.filter(n => !joined.has(n.id)).length;
@@ -172,6 +229,7 @@ function renderMap(q, data) {
     .map(n => `${name(n.id)} goes ${out.get(n.id).length} ways: it ${out.get(n.id).map(e => way(n, e)).join(', ')}. `).join('');
   q('mapWhy').textContent = branches + (left ? `This shows the ${count(links.length)} most-taken of ${plural(graph.edges.length, 'link')}; ${plural(unlinked, 'step')} ${unlinked === 1 ? 'is' : 'are'} left out, and all are in the table below. ` : '') +
     `Arrow width is how many times a hop happened across ${plural(graph.run_count, 'run')}; where a step goes more than one way, the % is that way's share. Links come from the trace: an LLM call choosing a tool, the tool whose result the next LLM call read, the prompt that started a run, and the LLM call that replied. Where a trace doesn't record which LLM call chose a tool or read its result (OpenTelemetry traces often don't), the link is taken from the order the calls ran in within one run.`;
+  return marks;
 }
 
 const gapsOf = data => (data.data_quality?.gaps || []).filter(gap => gap.key !== 'user_input');  // the client drops it on purpose
@@ -226,24 +284,24 @@ function renderSteps(q, data, showAllSteps) {
     runs && cost ? `One run costs about <b>${money(cost / runs)}</b>.` : '',
     first && cost && listed.length > 1 ? `The biggest cost is ${stepName(first.node)}: <b>${money(first.total_cost)}</b>, ${share(first.total_cost, cost)} of the spend.` : '',
     repeated
-      ? `<b>${money(repeated)}</b> (${share(repeated, cost)}) went on repeated calls: the same input and the same result as an earlier call. Reusing those results instead of calling again would save it.`
+      ? `<b>${money(repeated)}</b> (${share(repeated, cost)}) went on repeated calls: the same input and the same result as an earlier call. Reusing those results instead of calling again would avoid that spend.`
       : 'The report found no repeated calls.',
     data.mode === 'diagnose' ? ''
       : toTry ? `There ${toTry === 1 ? 'is 1 change' : `are ${count(toTry)} changes`} to try, on the rows marked <strong>Try:</strong> in the table below.`
       : 'There are no changes to try yet.',
     needRuns ? `For ${plural(needRuns, 'step')}, the report can’t tell yet whether calls repeat: it needs more runs of this workflow.` : '',
     unrecorded ? `For ${plural(unrecorded, 'step')}, the trace doesn’t record all of what the step saw, so the report can’t compare its calls.` : '',
-    gaps ? `Your data is missing ${plural(gaps, 'kind')} of information, so the report may have missed some savings: see “What the report couldn’t see”.` : '',
+    gaps ? `Your data is missing ${plural(gaps, 'kind')} of information, so the report may have missed some findings: see “What the report couldn’t see”.` : '',
   ].filter(Boolean).map(l => `<li>${l}</li>`).join('');
 
   q('steps').querySelector('tbody').innerHTML = shown.map(s => {
     const acts = tries(s);
-    return `<tr class="${acts.length ? 'has-try' : ''}">
+    return `<tr class="${acts.length ? 'has-try' : ''}" data-node="${esc(s.node)}">
       <td data-label="Step">${stepName(s.node)}<span class="note">${plural(s.occurrences, 'call')}</span></td>
       <td class="barcell"><div class="spendbar"><i style="width:${max ? 100 * (s.total_cost || 0) / max : 0}%"></i><i class="rep" style="width:${max ? 100 * s.repeat / max : 0}%"></i></div></td>
       <td class="num" data-label="Cost">${money(s.total_cost)}<span class="note">${share(s.total_cost || 0, cost)}</span></td>
       <td data-label="Repeats">${repeats(s)}</td></tr>` +
-      (acts.length ? `<tr class="try"><td colspan="4">${acts.map(a => `<strong>Try:</strong> ${a}`).join('<br>')}</td></tr>` : '');
+      (acts.length ? `<tr class="try" data-node="${esc(s.node)}"><td colspan="4">${acts.map(a => `<strong>Try:</strong> ${a}`).join('<br>')}</td></tr>` : '');
   }).join('') + (steps.length > listed.length ? `<tr class="more"><td colspan="4">${showAllSteps
       ? `<button class="link" type="button" data-steps="less">Hide the steps with no cost and no repeats</button>`
       : `${plural(steps.length - listed.length, 'more step')} recorded no cost and no repeats. <button class="link" type="button" data-steps="all">Show them</button>`}</td></tr>` : '');
@@ -257,6 +315,11 @@ const SHEET = `
     </div>
     <div class="tools"></div>
   </div>
+  <div class="lead" data-r="lead" hidden>
+    <p class="head" data-r="head"></p>
+    <p class="sub" data-r="sub"></p>
+  </div>
+  <p class="notes" data-r="notes"></p>
   <p class="totals" data-r="totals"></p>
   <p class="scope" data-r="scope" hidden></p>
   <section class="says">
@@ -268,6 +331,10 @@ const SHEET = `
     <div class="mapbox" data-r="map"></div>
     <p class="why" data-r="mapWhy"></p>
     <div class="events" data-r="events" hidden></div>
+  </section>
+  <section class="first" data-r="firstSection" hidden>
+    <h3>Do these first</h3>
+    <div data-r="first"></div>
   </section>
   <section>
     <h3>Where the money went</h3>
@@ -282,8 +349,7 @@ const SHEET = `
   <section data-r="gapsSection">
     <h3>What the report couldn't see</h3>
     <dl class="gaps" data-r="gaps"></dl>
-  </section>
-  <p class="notes" data-r="notes"></p>`;
+  </section>`;
 
 // With `showEvent` (the report's path on this machine), a map step lists a few of its calls, each with the
 // profiler-client command that prints its original record. The page runs nothing itself.
@@ -313,7 +379,7 @@ function wireEvents(q, data, reportPath) {
     g.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); show(g); } });
   }
   if (!q('map').querySelector('g.pick')) return;
-  q('map').querySelector('.legend')?.insertAdjacentHTML('beforeend', '<span>Click a step to look up example calls</span>');
+  q('map').querySelector('.legend.kinds')?.insertAdjacentHTML('beforeend', '<span>Click a step to look up example calls</span>');
   panel.addEventListener('click', e => {
     const b = e.target.closest('button[data-copy]');
     if (!b) return;
@@ -321,6 +387,92 @@ function wireEvents(q, data, reportPath) {
     // the clipboard can be refused on a local file: then select the command for the user to copy
     navigator.clipboard?.writeText(code.textContent).then(() => { b.textContent = 'Copied'; },
       () => getSelection().selectAllChildren(code)) ?? getSelection().selectAllChildren(code);
+  });
+}
+
+const pct = (part, whole) => { const p = 100 * part / whole; return p > 0 && p < 1 ? '<1%' : `${Math.round(p)}%`; };
+
+// the headline: how much of this workflow's spend went to calls the findings could remove, each call counted once
+function renderLead(q, data) {
+  const r = data.summary?.replaceable, cost = data.summary?.totals?.cost || 0;
+  q('lead').hidden = !r;
+  if (!r) return;
+  const what = 'a rule, a script or a cache could replace';
+  const found = `from ${plural(r.findings, 'finding')}, each call counted once`;
+  if (!cost) {
+    q('head').textContent = `No cost is recorded for this workflow, so the report can’t say how much of it went to calls ${what}.`;
+    q('sub').textContent = '';
+  } else if (!r.cost) {
+    q('head').textContent = `The report found no calls in this workflow that ${what}.`;
+    q('sub').textContent = `It cost ${money(cost)} in this dataset.`;
+  } else if (r.cost >= 50) {
+    q('head').innerHTML = `<b>${money(r.cost)}</b> of the ${money(cost)} this workflow cost went to calls ${what}.`;
+    q('sub').textContent = `That is ${pct(r.cost, cost)} of this workflow’s spend in this dataset, ${found}.`;
+  } else {  // a small sum reads as nothing: lead with the share
+    q('head').innerHTML = `<b>${pct(r.cost, cost)}</b> of this workflow’s spend went to calls ${what}.`;
+    q('sub').textContent = `${money(r.cost)} of ${money(cost)} in this dataset, ${found}.`;
+  }
+}
+
+// the risk label, then the reasons the evidence line doesn't already give (those quote the call count)
+const riskLine = (n, labels) => {
+  const why = (n.risk_reasons || []).filter(r => !new RegExp(`\\b${n.observations}\\b`).test(r));
+  return `${labels[n.risk] || n.risk}${why.length ? `: ${why.join('; ')}` : ''}.`;
+};
+
+// "Do these first": the server's next steps, at most three
+function renderFirst(q, data, onMap) {
+  const steps = data.summary?.next_steps, labels = data.summary?.risk_labels || {};
+  q('firstSection').hidden = !Array.isArray(steps);
+  if (!Array.isArray(steps)) return;
+  if (!steps.length) {
+    const gaps = gapsOf(data);
+    q('first').innerHTML = `<p class="nothing">The report found nothing to change yet${gaps.length
+      ? `. Your data is missing ${esc(gaps.map(g => g.label).join(', '))}, so it may have missed some: see “What the report couldn’t see”.` : '.'}</p>`;
+    return;
+  }
+  q('first').innerHTML = `<ol>${steps.map((n, i) => `<li class="card">
+    <p class="top"><span class="stepl">${esc(STEP[n.step] || n.step)}</span><span class="cost">${n.saving ? `${money(n.saving)} <span class="k">in this dataset</span>` : 'No saving counted'}</span></p>
+    <h4>${esc(TITLE[n.type] || n.type)}</h4>
+    <p class="where">${(n.nodes || [n.title]).map(stepName).join(' → ')}</p>
+    <p>${esc((EVIDENCE[n.type] || (k => plural(k, 'call') + ' seen.'))(n.observations))}</p>
+    ${n.do ? `<p class="do">${esc(n.do)}</p>` : ''}
+    <p class="risk">${esc(riskLine(n, labels))}</p>
+    ${findingNodes(n).some(id => onMap.has(id)) ? `<button type="button" class="btn-map" data-first="${i}">Show on the map</button>` : ''}
+  </li>`).join('')}</ol>`;
+}
+
+// a marked map step shows its rows in the table; a card's button shows its steps on the map
+function wireMarks(q, data, marks) {
+  const groups = [...q('map').querySelectorAll('g[data-node]')];
+  const pick = ids => groups.forEach(g => g.classList.toggle('sel', ids.has(g.dataset.node)));
+  const rows = ids => [...q('steps').querySelectorAll('tr[data-node]')].filter(tr => ids.has(tr.dataset.node));
+  const showRows = id => {
+    const ids = marks.get(id).rows;
+    let found = rows(ids);
+    if (new Set(found.map(tr => tr.dataset.node)).size < ids.size && q('steps').querySelector('button[data-steps="all"]')) {
+      renderSteps(q, data, true);
+      found = rows(ids);
+    }
+    q('steps').querySelectorAll('tr.hl').forEach(tr => tr.classList.remove('hl'));
+    found.forEach(tr => tr.classList.add('hl'));
+    pick(new Set([id]));
+    found[0]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  };
+  for (const g of groups.filter(g => marks.has(g.dataset.node))) {
+    const id = g.dataset.node, events = g.classList.contains('pick');
+    g.classList.add('pick');
+    g.setAttribute('tabindex', '0');
+    g.setAttribute('role', 'button');
+    g.setAttribute('aria-label', `${id}, ${g.dataset.marks}: show its rows in the table${events ? ' and example calls' : ''}`);
+    g.addEventListener('click', () => showRows(id));
+    g.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showRows(id); } });
+  }
+  q('first').addEventListener('click', e => {
+    const b = e.target.closest('button[data-first]');
+    if (!b) return;
+    pick(new Set(findingNodes(data.summary.next_steps[b.dataset.first])));
+    q('map').scrollIntoView({ block: 'center', behavior: 'smooth' });
   });
 }
 
@@ -332,8 +484,10 @@ function render(root, data, { name = '', meta = [], showEvent = null } = {}) {
   q('meta').textContent = [...meta, g && `dataset grade ${g.grade} (${String(g.word || '').toLowerCase()})`].filter(Boolean).join(' · ');
   q('grade').hidden = !g;
   if (g) { q('grade').dataset.g = g.grade; q('gradeLetter').textContent = g.grade; q('grade').setAttribute('aria-label', `Dataset grade ${g.grade}`); }
-  renderMap(q, data);
+  const marks = renderMap(q, data);
   if (showEvent) wireEvents(q, data, showEvent);
+  renderLead(q, data);
+  renderFirst(q, data, new Set([...q('map').querySelectorAll('g[data-node]')].map(g => g.dataset.node)));
   q('totals').innerHTML = `${money(t.cost)} <span class="k">across</span> ${plural(t.runs, 'run')}<span class="k">,</span> ` +
     `${plural(t.llm_calls, 'LLM call')} <span class="k">and</span> ${plural(t.tool_calls, 'tool call')}<span class="k">,</span> ${count(t.tokens)} tokens.`;
 
@@ -343,6 +497,7 @@ function render(root, data, { name = '', meta = [], showEvent = null } = {}) {
     ? `This report covers one workflow, ${stepName(wf.name)}: ${plural(wf.num_runs, 'run')} of the ${count(allRuns)} in your dataset.` : '';
   q('scope').hidden = !(wf && workflows.length > 1);
   renderSteps(q, data, false);
+  wireMarks(q, data, marks);
   q('steps').addEventListener('click', e => {
     const b = e.target.closest('button[data-steps]');
     if (b) renderSteps(q, data, b.dataset.steps === 'all');

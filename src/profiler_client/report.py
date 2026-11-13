@@ -134,7 +134,11 @@ def _list(value: Any) -> list:
 def view(report: dict) -> dict:
     """Only the fields report.js draws. The page holds restored names, and a finding's
     matched inputs (``inputs``, ``groups``) are never drawn, so they are never written."""
-    summary = _pick(report.get("summary"), ("totals", "notes"))
+    summary = _pick(report.get("summary"), ("totals", "notes", "replaceable", "risk_labels"))
+    if "next_steps" in _pick(report.get("summary"), ("next_steps",)):
+        summary["next_steps"] = [
+            _pick(n, ("step", "do", "type", "title", "nodes", "saving", "risk", "risk_reasons", "observations"))
+            for n in _list(report["summary"]["next_steps"]) if isinstance(n, dict)]
     summary["opportunities"] = [
         {**_pick(o, ("type", "nodes", "title", "saving", "observations", "action")),
          "identity": _pick(o.get("identity"), ("agent",))}

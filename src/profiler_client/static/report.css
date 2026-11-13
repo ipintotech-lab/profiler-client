@@ -77,8 +77,48 @@
 .sheet .events li + li { margin-top: 6px; }
 .sheet .events code { font-size: 13px; overflow-wrap: anywhere; user-select: all; }
 @media print { .sheet .events { display: none !important; } }
+/* what a finding marks on the map: an outline, a fill and a badge with words */
+.sheet .mapbox .node.replace rect { stroke: var(--estimate); stroke-width: 3; }
+.sheet .mapbox .node.repeats rect { stroke: var(--carbon-deep); stroke-width: 2.5; }
+.sheet .mapbox .node.unstable rect { stroke: var(--bad); stroke-width: 3; stroke-dasharray: 6 3; }
+.sheet .mapbox .node.sel rect { stroke: var(--ink); stroke-width: 4; stroke-dasharray: none; }
+.sheet .mapbox .badge rect { stroke: none; }
+.sheet .mapbox .badge text { font-size: 11px; font-weight: 700; }
+.sheet .mapbox .badge.replace rect, .sheet .pill.replace { fill: var(--estimate); background: var(--estimate); }
+.sheet .mapbox .badge.repeats rect, .sheet .pill.repeats { fill: var(--carbon-deep); background: var(--carbon-deep); }
+.sheet .mapbox .badge.unstable rect, .sheet .pill.unstable { fill: var(--bad); background: var(--bad); }
+.sheet .mapbox .badge text { fill: #fff; }
+.sheet .mapbox .legend.marks { margin: 0 0 12px; }
+.sheet .pill { display: inline-block; color: #fff; font-style: normal; font-size: 12px; font-weight: 700; border-radius: 10px; padding: 1px 9px; margin-right: 6px; }
+.sheet .mapbox .node.pick:focus-visible { outline: none; }
+.sheet .mapbox .node.pick:focus-visible rect { stroke: var(--carbon); stroke-width: 4; }
+.sheet .pill, .sheet .mapbox .badge { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .sheet .mapbox .none { color: var(--ink-2); font-size: 15px; max-width: 70ch; }
 .sheet .mapbox .sw, .sheet .mapbox svg { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+/* the headline */
+.sheet .lead { margin-top: 18px; }
+.sheet .lead .head { font-size: 22px; line-height: 1.35; font-weight: 600; letter-spacing: -.01em; max-width: 46ch; }
+.sheet .lead .head b { font-weight: 800; }
+.sheet .lead .sub { font-size: 15px; color: var(--ink-2); margin-top: 4px; max-width: 70ch; }
+.sheet .lead + .notes { margin-top: 8px; }
+.sheet .lead:not([hidden]) ~ .totals { font-size: 16px; font-weight: 400; margin-top: 12px; }
+
+/* do these first */
+.sheet section.first ol { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.sheet .card { border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; font-size: 15px; break-inside: avoid; }
+.sheet .card .top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.sheet .card .stepl { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--carbon-deep); }
+.sheet .card .cost { font-weight: 700; font-variant-numeric: tabular-nums; }
+.sheet .card .cost .k { font-weight: 400; color: var(--ink-2); font-size: 13px; }
+.sheet .card h4 { margin: 0; font-size: 17px; }
+.sheet .card .where { font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+.sheet .card .risk, .sheet .card .do { color: var(--ink-2); }
+.sheet .card .btn-map { margin-top: auto; align-self: flex-start; min-height: 44px; padding: 8px 14px; background: transparent; color: var(--carbon); border: 0; box-shadow: inset 0 0 0 1.5px var(--carbon); border-radius: 6px; font: 600 14px/1.2 var(--sans); cursor: pointer; }
+.sheet .card .btn-map:hover { background: var(--pseudo); }
+.sheet section.first .nothing { color: var(--ink-2); max-width: 70ch; margin-top: 8px; }
+.sheet .tbl tr.hl td { background: var(--estimate-bg); }
+@media print { .sheet .card .btn-map { display: none; } }
 
 /* where the money went */
 .sheet .keys { margin-top: 12px; font-size: 14px; color: var(--ink-2); }
