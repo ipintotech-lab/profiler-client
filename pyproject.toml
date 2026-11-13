@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "profiler-client"
-version = "0.8.1"
+version = "0.8.2"
 description = "Prepare AI agent traces for the AI Agent Profiler locally: pseudonymized, privacy-checked, never sent without you"
 readme = "README.md"
 requires-python = ">=3.10"
