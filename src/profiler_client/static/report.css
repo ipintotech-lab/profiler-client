@@ -247,3 +247,25 @@
 .sheet .hotspots button:hover, .sheet .hotspots button[aria-pressed="true"] { border-color: var(--carbon); background: var(--pseudo); }
 .sheet .stepsof { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--rule); }
 .sheet .stepsof h4 { margin: 0; font-size: 16px; }
+/* on paper: the agent map alone on a landscape page at its natural size; the hot spots table and one section
+   per agent follow, each agent's section free to start a new page */
+.sheet .amprint { display: none; }
+.sheet .amprint .h { color: var(--ink-2); font-family: var(--mono); font-size: 13px; font-weight: 400; }
+.sheet .amprint .k { color: var(--ink-2); }
+.sheet .amprint .finds { padding-left: 18px; }
+.sheet .amprint .finds li > span { display: block; }
+@media print {
+  @page wide { size: landscape; }
+  .sheet section.map:has(.agentmap) { page: wide; }
+  .sheet .agentmap { display: block; break-inside: avoid; }
+  .sheet .agentmap .hotspots, .sheet .ampanel, .sheet section.map .stepsof { display: none !important; }
+  .sheet .amprint:not([hidden]) { display: block; }
+  .sheet .amprint .tbl.hot { break-inside: avoid; }
+  .sheet .amprint .agent { margin-top: 24px; }
+  .sheet .amprint h3, .sheet .amprint h4, .sheet .amprint .agent > p.k { break-after: avoid; }
+  .sheet .amprint .tbl tr { break-inside: avoid; }
+  .sheet .amprint .mapbox { break-inside: avoid; }  /* a step map with its legend */
+  .sheet .amprint .mapscroll { overflow: visible; }
+  .sheet .amprint .mapbox svg { min-width: 0 !important; }  /* shrinks to the page, never past it */
+  .sheet .amprint .mapbox:has(svg) + p.why { display: none; }  /* said once, under the first map */
+}

@@ -456,6 +456,7 @@ const SHEET = HEAD + `
     </div>
     <div class="events" data-r="events" hidden></div>
   </section>
+  <section class="amprint" data-r="amPrint" hidden></section>
   <section class="first" data-r="firstSection" hidden>
     <h3>Do these first</h3>
     <div data-r="first"></div>
@@ -675,7 +676,9 @@ function agentMapModel(data) {
         return on.includes(it.id) || (!!node?.agent && o.type !== 'EXTRACT_DETERMINISTIC_SUBSTEP' && on.includes(stepOf(node)) && (!o.identity?.agent || o.identity.agent === node.agent));
       }
       const mine = new Set(it.a.step_ids.map(s => stepOf(byId.get(s) || { id: s })));
-      return on.some(s => mine.has(s)) && (!o.identity?.agent || o.identity.agent === it.id || sharedBy(o).includes(it.id));
+      // a finding that names no agent is its only if all its steps are its own: every agent here has a "handoff"
+      return o.identity?.agent ? on.some(s => mine.has(s)) && (o.identity.agent === it.id || sharedBy(o).includes(it.id))
+        : sharedBy(o).length ? sharedBy(o).includes(it.id) : !!o.nodes?.length && o.nodes.every(s => mine.has(s));
     }).filter(o => {
       const key = `${o.type} ${(o.nodes || [o.title]).join(' ')}`, was = once.get(key);
       if (was) { was.observations = (was.observations || 0) + (o.observations || 0); return false; }
@@ -789,6 +792,54 @@ function renderAgentMap(q, data, m) {
     'Links come from the trace: which result a decision read, and which agent it started. A % on a link is the share of runs reaching where it starts that take it.';
 }
 
+// a map item's findings, each with its evidence sentence and the risk reason
+function findsHtml(m, it, labels) {
+  return it.findings.length ? `<ul class="finds">${it.findings.map(o => {
+    const ev = (EVIDENCE[o.type] || (k => plural(k, 'call') + ' seen.'))(o.observations);
+    const peers = sharedBy(o).filter(a => a !== it.id);
+    return `<li><b>${esc(TITLE[o.type] || o.type)}</b> <span class="where">${(o.nodes || [o.title]).map(stepName).join(' → ')}</span>` +
+      `<span>${esc(ev)}${peers.length ? esc(` Also made by ${peers.map(m.agentName).join(', ')}.`) : ''}</span>` +
+      (o.next ? `<span class="k">${esc(riskLine(o.next, labels))}</span>` : '') + '</li>';
+  }).join('')}</ul>` : '<p class="k">No finding on this one.</p>';
+}
+
+// one agent's steps: its step map, or, where the trace links none of them to another, a table of them
+function agentStepsInto(q, data, m, it, slot, why, all = false) {
+  const mine = new Set(it.a.step_ids);
+  const graph = { ...data.graph, nodes: data.graph.nodes.filter(n => mine.has(n.id)), edges: data.graph.edges.filter(e => mine.has(e.from) && mine.has(e.to)) };
+  const sub = k => q({ map: slot, mapWhy: why }[k] || k);
+  if (!graph.edges.length) {
+    const rows = graph.nodes.slice().sort((x, y) => (y.occurrences || 0) - (x.occurrences || 0)).map(n => {
+      const words = Object.keys(MARK).filter(k => m.marks.get(n.id)?.kinds?.has(k)).map(k => MARK[k].badge).join(', ');
+      return `<tr><td>${stepName(stepOf(n))}</td><td class="num">${count(n.occurrences)}</td><td class="num">${money(n.cost)}</td><td>${esc(words)}</td></tr>`;
+    }).join('');
+    q(slot).innerHTML = `<table class="tbl agsteps"><thead><tr><th>Step</th><th class="num">Calls</th><th class="num">Cost</th><th>Marks</th></tr></thead><tbody>${rows}</tbody></table>`;
+    q(why).textContent = 'The trace links none of these steps to another, so they are listed, not mapped.';
+    return { graph, sub, marks: null };
+  }
+  const marks = renderMap(sub, { ...data, graph }, all);
+  const svg = q(slot).querySelector('svg');  // a few steps: drawn at their natural size, never stretched
+  if (svg?.viewBox) svg.style.maxWidth = `${svg.viewBox.baseVal.width}px`;
+  return { graph, sub, marks };
+}
+
+// on paper, in place of the panel and the hot spot buttons: a hot spots table, then one section per agent
+// with spend or findings, each with its step map and findings
+function renderAgentPrint(q, data, m) {
+  const labels = data.summary?.risk_labels || {}, what = it => it.findings.length
+    ? it.findings.map(o => TITLE[o.type] || o.type).filter((t, i, a) => a.indexOf(t) === i).join('; ') : 'no finding';
+  const name = it => `${esc(it.name)}${it.sub ? ` <span class="h">${esc(it.sub)}</span>` : ''}`;
+  const table = m.hot.length ? `<h3>Hot spots</h3><table class="tbl hot"><thead><tr><th class="num">#</th><th>Where</th><th class="num">Share</th><th class="num">Cost</th><th>Finding</th></tr></thead><tbody>` +
+    m.hot.map(it => `<tr><td class="num">${it.hot}</td><td>${name(it)}</td><td class="num">${amPct(it.share)}</td><td class="num">${money(it.cost)}</td><td>${esc(what(it))}</td></tr>`).join('') +
+    '</tbody></table>' : '';
+  const agents = m.ag.agents.map(a => m.items.get(a.id)).filter(it => (it.cost || 0) > 0 || it.findings.length);
+  q('amPrint').innerHTML = table + agents.map((it, i) => `<div class="agent"><h3>${name(it)}</h3>` +
+    `<p class="k">${esc(`${amPct(it.share)} of spend, ${money(it.cost)}, ${plural(it.a.steps, 'step')}.`)}</p>` +
+    `<div class="mapbox" data-r="pm${i}"></div><p class="why" data-r="pw${i}"></p><h4>Findings on its steps</h4>${findsHtml(m, it, labels)}</div>`).join('');
+  agents.forEach((it, i) => agentStepsInto(q, data, m, it, `pm${i}`, `pw${i}`));
+  q('amPrint').hidden = !(table || agents.length);
+}
+
 function agentPanel(q, data, m, id, showEvent) {
   const it = m.items.get(id), ag = m.ag, runs = data.graph.run_count || 0, labels = data.summary?.risk_labels || {};
   if (!it) return;
@@ -801,13 +852,7 @@ function agentPanel(q, data, m, id, showEvent) {
       return `<li>${esc(`${how} ${to}${xs.length > 1 ? ', together' : ''}: ${plural(x.runs, 'run')} (${amPct(x.share)})${x.loop ? `, ${x.loop.passes} passes each` : ''}${(x.share || 0) < 0.1 ? ' · not drawn: under 10% of runs' : ''}`)}</li>`;
     }).join('')}</ul>` : '<p class="k">It hands over to no other agent.</p>';
   };
-  const finds = it.findings.length ? `<ul class="finds">${it.findings.map(o => {
-    const ev = (EVIDENCE[o.type] || (k => plural(k, 'call') + ' seen.'))(o.observations);
-    const peers = sharedBy(o).filter(a => a !== id);
-    return `<li><b>${esc(TITLE[o.type] || o.type)}</b> <span class="where">${(o.nodes || [o.title]).map(stepName).join(' → ')}</span>` +
-      `<span>${esc(ev)}${peers.length ? esc(` Also made by ${peers.map(m.agentName).join(', ')}.`) : ''}</span>` +
-      (o.next ? `<span class="k">${esc(riskLine(o.next, labels))}</span>` : '') + '</li>';
-  }).join('')}</ul>` : '<p class="k">No finding on this one.</p>';
+  const finds = findsHtml(m, it, labels);
   let html;
   if (it.type === 'decision') {
     html = `<p class="kind">LLM decision</p><h4>${esc(it.name)}</h4>` +
@@ -833,14 +878,10 @@ function agentPanel(q, data, m, id, showEvent) {
 // the per-agent step map, under the agent map: today's map, limited to one agent's steps
 function renderAgentSteps(q, data, m, id, showEvent, all = false) {
   // only the links between its own steps: how runs reach it and leave it is on the agent map above
-  const mine = new Set(m.items.get(id).a.step_ids);
-  const graph = { ...data.graph, nodes: data.graph.nodes.filter(n => mine.has(n.id)), edges: data.graph.edges.filter(e => mine.has(e.from) && mine.has(e.to)) };
-  const sub = k => q({ map: 'stepMap', mapWhy: 'stepWhy' }[k] || k);
   q('stepsOf').hidden = false;
   q('stepsOfName').textContent = `${m.items.get(id).name}${m.items.get(id).sub ? ` (${m.items.get(id).sub})` : ''}: its steps`;
-  const marks = renderMap(sub, { ...data, graph }, all);
-  const svg = q('stepMap').querySelector('svg');  // a few steps: drawn at their natural size, never stretched
-  if (svg) svg.style.maxWidth = `${svg.viewBox.baseVal.width}px`;
+  const { graph, sub, marks } = agentStepsInto(q, data, m, m.items.get(id), 'stepMap', 'stepWhy', all);
+  if (!marks) return;
   if (showEvent) wireEvents(sub, { ...data, graph }, showEvent);
   wireMarks(sub, data, marks);
   q('stepMap').onclick = e => {  // its own "show all links" control
@@ -905,6 +946,7 @@ function renderReport(root, data, { name = '', meta = [], showEvent = null } = {
   const drawMap = all => {
     if (am) {
       renderAgentMap(q, data, am);
+      renderAgentPrint(q, data, am);
       selectAgent = wireAgentMap(q, data, am, showEvent);
       const onMap = new Set(data.graph.nodes.flatMap(n => [n.id, stepOf(n)]).filter(s => am.where(s)));
       renderFirst(q, data, onMap);

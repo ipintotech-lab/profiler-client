@@ -70,3 +70,14 @@ def test_one_share_of_spend_for_a_step_everywhere_it_is_shown():
     panel = re.search(r"([0-9<]+%) of spend\.", page["amPanel"])
     table = re.search(r'data-node="route_kyc".*?data-label="Cost">[^<]*<span class="note">([^<]+)</span>', page["steps"], re.DOTALL)
     assert [x and x.group(1) for x in (box, figures, hot, panel, table)] == ["58%"] * 5
+
+
+def test_print_has_the_hot_spots_then_one_section_per_agent_with_spend():
+    page = _render(_report())
+    hot = re.findall(r"<tr><td class=\"num\">(\d)</td><td>([^<]+)</td><td class=\"num\">([^<]+)</td>", page["amPrint"])
+    assert hot == [("1", "route_kyc", "58%"), ("2", "route_checks", "42%")]
+    # only the supervisor has spend; the specialists have neither spend nor findings, so get no section
+    assert re.findall(r'<div class="agent"><h3>([^<]+)</h3>', page["amPrint"]) == ["sup"]
+    # its two steps have no link between them in the trace: a table, not an empty map
+    assert '<table class="tbl agsteps">' in page["pm0"] and "<svg" not in page["pm0"]
+    assert re.findall(r'<span class="step">([^<]+)</span>', page["pm0"]) == ["route_kyc", "route_checks"]
