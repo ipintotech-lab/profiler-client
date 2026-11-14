@@ -142,3 +142,23 @@ def test_a_step_or_agent_with_no_recorded_cost_shows_a_dash_not_zero_dollars():
     assert "$0<" not in page["steps"] and "$0," not in page["steps"]
     assert "kyc</span> <span class=\"k\">no cost recorded" in page["steps"]
     assert "$0" not in page["amPrint"] and "$0" not in page["amPanel"]
+
+
+def test_a_decision_that_follows_from_its_input_is_a_lookup_card():
+    report = _report()
+    report["summary"]["next_steps"] = [{**_step("CONDITIONAL_LLM_BYPASS", ["route_checks"], 2.5, "replay"), "observations": 1242, "lookup_entries": 6}]
+    first = _render(report)["first"]
+    assert "Replace an LLM decision with a lookup" in first
+    assert "6 different inputs, each always given the same choice, across 1,242 calls." in first
+
+
+def test_the_page_gets_how_many_inputs_a_lookup_holds_not_the_inputs():
+    from profiler_client.report import view
+    lookup = {**_step("CONDITIONAL_LLM_BYPASS", ["route_checks"], 2.5), "by_input": [
+        {"input": {"tier": "h:secret1"}, "choice": "reject", "observations": 40, "confirmed": True},
+        {"input": {"tier": "h:secret2"}, "choice": "approve", "observations": 30, "confirmed": True},
+        {"input": {"tier": "h:secret3"}, "choice": "approve", "observations": 2, "confirmed": False}]}
+    page = view({"summary": {"opportunities": [lookup], "next_steps": [{**lookup, "lookup_entries": 2}]}})
+    assert page["summary"]["opportunities"][0]["lookup_entries"] == 2
+    assert page["summary"]["next_steps"][0]["lookup_entries"] == 2
+    assert "secret" not in json.dumps(page)

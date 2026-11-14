@@ -44,6 +44,12 @@ const EVIDENCE = {
   REVIEW_HIDDEN_STATE: n => `Across ${plural(n, 'call')}, the same request gave different results.`,
   CROSS_AGENT_DUPLICATE: n => `In ${plural(n, 'run')}, more than one agent made this call with the same input and got the same result.`,
 };
+// a decision that follows from its input: one lookup, from each input it has seen 10+ times to its choice
+const lookupInputs = o => o.type === 'CONDITIONAL_LLM_BYPASS' ? (o.by_input ? o.by_input.filter(b => b.confirmed).length : o.lookup_entries || 0) : 0;
+const title = o => lookupInputs(o) ? 'Replace an LLM decision with a lookup' : TITLE[o.type] || o.type;
+const evidenceOf = o => lookupInputs(o)
+  ? `${plural(lookupInputs(o), 'different input')}, each always given the same choice, across ${plural(o.observations, 'call')}.`
+  : (EVIDENCE[o.type] || (k => plural(k, 'call') + ' seen.'))(o.observations);
 // what the map marks on a step a finding is about: each has its own words, never colour alone
 const MARK = {
   unstable: { badge: 'unstable result', legend: 'the same request gave different results' },
@@ -598,15 +604,14 @@ function renderFirst(q, data, onMap) {
     const key = `${(n.nodes || [n.title]).join(' ')} ${n.identity?.agent || ''}`, card = cards.find(c => c.key === key);
     if (card) card.opts.push(n); else cards.push({ key, i, opts: [n] });
   });
-  const evidence = n => (EVIDENCE[n.type] || (k => plural(k, 'call') + ' seen.'))(n.observations);
   q('first').innerHTML = `<ol>${cards.map(({ i, opts: [n, ...more] }) => {
     const saving = Math.max(0, ...[n, ...more].map(o => o.saving || 0));
-    const opt = o => `<p>${esc(evidence(o))}</p>${o.do ? `<p class="do">${esc(o.do)}</p>` : ''}<p class="risk">${esc(riskLine(o, labels))}</p>`;
+    const opt = o => `<p>${esc(evidenceOf(o))}</p>${o.do ? `<p class="do">${esc(o.do)}</p>` : ''}<p class="risk">${esc(riskLine(o, labels))}</p>`;
     return `<li class="card">
     <p class="top"><span class="stepl">${esc(STEP[n.step] || n.step)}</span><span class="cost">${saving ? `${money(saving)} <span class="k">in this dataset</span>` : 'No saving counted'}</span></p>
-    <h4>${esc([n, ...more].map((o, j) => { const t = TITLE[o.type] || o.type; return j ? t.charAt(0).toLowerCase() + t.slice(1) : t; }).join(', or '))}</h4>
+    <h4>${esc([n, ...more].map((o, j) => { const t = title(o); return j ? t.charAt(0).toLowerCase() + t.slice(1) : t; }).join(', or '))}</h4>
     <p class="where">${(n.nodes || [n.title]).map(stepName).join(' → ')}</p>
-    ${more.length ? [n, ...more].map(o => `<h5>${esc(TITLE[o.type] || o.type)}</h5>${opt(o)}`).join('') + '<p class="k">Either one saves the same calls: the amount is counted once.</p>' : opt(n)}
+    ${more.length ? [n, ...more].map(o => `<h5>${esc(title(o))}</h5>${opt(o)}`).join('') + '<p class="k">Either one saves the same calls: the amount is counted once.</p>' : opt(n)}
     ${findingNodes(n).some(id => onMap.has(id)) ? `<button type="button" class="btn-map" data-first="${i}">Show on the map</button>` : ''}
   </li>`;
   }).join('')}</ol>`;
@@ -624,7 +629,7 @@ function renderBetween(q, data) {
     const agents = sharedBy(o), runs = o.type === 'CROSS_AGENT_DUPLICATE' ? o.observations : o.between_agents.runs;
     const time = o.repeated_latency_ms ? `, ${(o.repeated_latency_ms / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })} s` : '';
     return `<li class="card">
-    <p class="top"><span class="stepl">${esc(TITLE[o.type] || o.type)}</span><span class="cost">${o.saving ? `${money(o.saving)} <span class="k">in this dataset</span>` : 'No dollar cost recorded'}</span></p>
+    <p class="top"><span class="stepl">${esc(title(o))}</span><span class="cost">${o.saving ? `${money(o.saving)} <span class="k">in this dataset</span>` : 'No dollar cost recorded'}</span></p>
     <h4>${stepName(rowOf(o))}</h4>
     <p class="where">${agents.map(stepName).join(' · ')}</p>
     <p>${esc(`The same call by ${plural(agents.length, 'agent')} in ${plural(runs, 'run')}`)}${o.type === 'CROSS_AGENT_DUPLICATE'
@@ -820,7 +825,7 @@ function renderAgentMap(q, data, m) {
     '<span><svg class="ln" width="28" height="8" aria-hidden="true"><path d="M0,4 H28"/></svg>Hands back to an earlier agent; a % on a link is the share of runs that take it</span>' +
     (hidden ? `<span>${esc(`${plural(hidden, 'route')} taken by under 10% of runs ${hidden === 1 ? 'is' : 'are'} not drawn; ${hidden === 1 ? 'it is' : 'they are'} in the details`)}</span>` : '') + '</p>';
   const buttons = hot.length ? `<div class="hotspots"><h4>Hot spots</h4><ol>${hot.map(it => {
-    const what = it.findings.length ? it.findings.map(o => TITLE[o.type] || o.type).filter((t, i, a) => a.indexOf(t) === i).join('; ') : 'no finding';
+    const what = it.findings.length ? it.findings.map(o => title(o)).filter((t, i, a) => a.indexOf(t) === i).join('; ') : 'no finding';
     return `<li><button type="button" data-an="${esc(it.id)}"><b>${it.hot}</b> <span>${esc(it.name)}${it.sub ? ` <span class="h">${esc(it.sub)}</span>` : ''}</span><span class="k">${esc(`${amPct(it.share)} of spend · ${what}`)}</span></button></li>`;
   }).join('')}</ol></div>` : '';
   q('map').innerHTML = `<div class="agentmap"><div class="ammap mapscroll"><svg viewBox="0 0 ${L.width} ${L.height}" style="max-width:${L.width}px;min-width:${Math.round(L.width * MAP_MIN_SCALE)}px" ` +
@@ -852,9 +857,9 @@ function renderHandoffs(q, m) {
 // a map item's findings, each with its evidence sentence and the risk reason
 function findsHtml(m, it, labels) {
   return it.findings.length ? `<ul class="finds">${it.findings.map(o => {
-    const ev = (EVIDENCE[o.type] || (k => plural(k, 'call') + ' seen.'))(o.observations);
+    const ev = evidenceOf(o);
     const peers = sharedBy(o).filter(a => a !== it.id);
-    return `<li><b>${esc(TITLE[o.type] || o.type)}</b> <span class="where">${(o.nodes || [o.title]).map(stepName).join(' → ')}</span>` +
+    return `<li><b>${esc(title(o))}</b> <span class="where">${(o.nodes || [o.title]).map(stepName).join(' → ')}</span>` +
       `<span>${esc(ev)}${peers.length ? esc(` Also made by ${peers.map(m.agentName).join(', ')}.`) : ''}</span>` +
       (o.next ? `<span class="k">${esc(riskLine(o.next, labels))}</span>` : '') + '</li>';
   }).join('')}</ul>` : '<p class="k">No finding on this one.</p>';
@@ -884,7 +889,7 @@ function agentStepsInto(q, data, m, it, slot, why, all = false) {
 // with spend or findings, each with its step map and findings
 function renderAgentPrint(q, data, m) {
   const labels = data.summary?.risk_labels || {}, what = it => it.findings.length
-    ? it.findings.map(o => TITLE[o.type] || o.type).filter((t, i, a) => a.indexOf(t) === i).join('; ') : 'no finding';
+    ? it.findings.map(o => title(o)).filter((t, i, a) => a.indexOf(t) === i).join('; ') : 'no finding';
   const name = it => `${esc(it.name)}${it.sub ? ` <span class="h">${esc(it.sub)}</span>` : ''}`;
   const table = m.hot.length ? `<h3>Hot spots</h3><table class="tbl hot"><thead><tr><th class="num">#</th><th>Where</th><th class="num">Share</th><th class="num">Cost</th><th>Finding</th></tr></thead><tbody>` +
     m.hot.map(it => `<tr><td class="num">${it.hot}</td><td>${name(it)}</td><td class="num">${amPct(it.share)}</td><td class="num">${spend(it.cost)}</td><td>${esc(what(it))}</td></tr>`).join('') +
