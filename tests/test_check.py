@@ -120,3 +120,27 @@ def test_check_writes_nothing_and_opens_no_connection(tmp_path, capsys, monkeypa
 @pytest.mark.parametrize("prices", ["1,2,3", "x,1", "-1,2"])
 def test_bad_prices_are_refused(tmp_path, prices):
     assert main(["check", str(_log(tmp_path)), f"--prices={prices}"]) == 1
+
+
+def test_duplicate_work_between_agents_needs_tool_arguments_agent_names_and_runs(tmp_path, capsys):
+    # the fixture's tools are called by one agent: possible only once a second agent calls them
+    _, out = _check(capsys, _log(tmp_path))
+    row = next(f for f in out["findings_possible"] if f["key"] == "between_agents")
+    assert row["status"] == "no" and row["reason"] == "only one agent calls tools"
+    log = json.loads(_log(tmp_path).read_text())
+    for i, e in enumerate(log["events"]):  # two runs become one: kyc's half, then credit's
+        e["agent"] = ["kyc", "credit"][i // 2 % 2]
+        e["runId"] = f"acme-run-{i // 4}"
+    two = tmp_path / "two.json"
+    two.write_text(json.dumps(log))
+    _, out = _check(capsys, two)
+    assert _found(out)["between_agents"] == "yes"
+    for e in log["events"]:  # each agent's calls under its own run id
+        e["runId"] = f"{e['runId']}-{e['agent']}"
+    two.write_text(json.dumps(log))
+    _, out = _check(capsys, two)
+    row = next(f for f in out["findings_possible"] if f["key"] == "between_agents")
+    assert row["status"] == "no" and "run id" in row["reason"]
+    _, out = _check(capsys, _log(tmp_path, runs=5, tool_input=False, name="thin.json"))
+    row = next(f for f in out["findings_possible"] if f["key"] == "between_agents")
+    assert row["status"] == "no" and row["reason"] == "needs tool arguments, 10 or more runs"
