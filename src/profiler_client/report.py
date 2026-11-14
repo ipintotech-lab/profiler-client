@@ -157,8 +157,11 @@ def _workflow_view(report: dict) -> dict:
             _pick(n, ("step", "do", "type", "title", "nodes", "saving", "risk", "risk_reasons", "observations"))
             for n in _list(report["summary"]["next_steps"]) if isinstance(n, dict)]
     summary["opportunities"] = [
-        {**_pick(o, ("type", "nodes", "title", "saving", "observations", "action")),
-         "identity": _pick(o.get("identity"), ("agent",))}
+        {**_pick(o, ("type", "nodes", "title", "saving", "observations", "action", "agents",
+                     "repeated_calls", "repeated_latency_ms")),
+         "identity": _pick(o.get("identity"), ("agent",)),
+         # a call agents also repeat between them within a run: which agents, in how many runs
+         **({"between_agents": _pick(o["between_agents"], ("agents", "runs"))} if isinstance(o.get("between_agents"), dict) else {})}
         for o in _list(_pick(report.get("summary"), ("opportunities",)).get("opportunities")) if isinstance(o, dict)]
     evidence = ("occurrences", "unique_inputs", "repeated_inputs", "repeated_observations", "determinism_confidence")
     by_agent = _pick(report.get("mine"), ("by_agent",)).get("by_agent")
