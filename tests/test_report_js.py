@@ -6,7 +6,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from test_graph import _agent_ev, _decision
+from test_graph import _agent_ev, _decision, _ev
 
 from profiler_client.graph import build_graph
 
@@ -81,3 +81,55 @@ def test_print_has_the_hot_spots_then_one_section_per_agent_with_spend():
     # its two steps have no link between them in the trace: a table, not an empty map
     assert '<table class="tbl agsteps">' in page["pm0"] and "<svg" not in page["pm0"]
     assert re.findall(r'<span class="step">([^<]+)</span>', page["pm0"]) == ["route_kyc", "route_checks"]
+
+
+def _step(type_, nodes, saving, step="declare"):
+    return {"type": type_, "step": step, "nodes": nodes, "observations": 4, "saving": saving, "risk": "low", "risk_reasons": []}
+
+
+def test_the_summary_gives_the_headline_figure_not_the_sum_of_the_rows_repeats():
+    report = _report()
+    report["summary"]["replaceable"] = {"cost": 2.5, "findings": 2}
+    report["summary"]["opportunities"] = [_step("CACHE_RESULT", ["route_kyc"], 3.0), _step("CACHE_RESULT", ["route_checks"], 1.0)]
+    says = _render(report)["says"]
+    assert "<b>$2.50</b> (25%) went to calls a rule, a script or a cache could replace, from 2 findings" in says
+    assert "$4.00" not in says
+
+
+def test_two_findings_on_the_same_calls_are_one_card_with_one_amount():
+    report = _report()
+    report["summary"]["next_steps"] = [_step("CACHE_RESULT", ["route_kyc"], 1.6), _step("CONDITIONAL_LLM_BYPASS", ["route_kyc"], 1.6, "review"),
+                                       _step("CACHE_RESULT", ["route_checks"], 0.5)]
+    first = _render(report)["first"]
+    assert first.count('<li class="card">') == 2
+    assert first.count("$1.60") == 1
+    assert "Reuse a repeated result, or replace an LLM decision with a rule" in first
+    assert 'data-first="2"' in first  # the second card still points at its own next step
+
+
+def test_where_the_money_went_is_grouped_by_agent_with_the_agent_map_figures():
+    report = _report()
+    report["mine"]["by_agent"]["kyc"] = {"actions": [{"node": "kyc_lookup", "total_cost": 0, "occurrences": 4}]}
+    rows = re.findall(r'<tr class="(agent|fold)">.*?</tr>', _render(report)["steps"])
+    assert rows == ["agent", "agent", "fold"]
+    steps = _render(report)["steps"]
+    assert re.search(r'<th colspan="4" scope="rowgroup"><span class="step">sup</span> <span class="k">\$10\.00, 100% of spend', steps)
+    assert "1 more step recorded no cost and no repeats." in steps
+
+
+def test_handoffs_are_listed_in_run_order():
+    rows = re.findall(r'<tr><td data-label="From">([^<]+)</td><td data-label="To">([^<]+)</td>', _render(_report())["handoffs"])
+    assert rows == [("route_kyc", "credit"), ("route_kyc", "fraud"), ("route_kyc", "docs"), ("docs", "kyc"), ("route_checks", "letter")]
+    assert "back to an earlier agent, 1 pass each" in _render(_report())["handoffs"]
+
+
+def test_a_long_step_name_wraps_on_the_map_and_is_never_cut():
+    events = []
+    for run in ("r1", "r2"):
+        events += [_ev(run, f"{run}a", "llm", cost=1.0), _ev(run, f"{run}b", "approve_transaction_after_review", f"{run}a")]
+    report = {"availability": {"graph": {"available": True}}, "graph": build_graph(events, "wf", "invokes")["graph"],
+              "summary": {"totals": {"cost": 2.0, "runs": 2}, "opportunities": [], "next_steps": []}, "mine": {"by_agent": {}}}
+    page = _render(report)["map"]
+    assert "…" not in page
+    # the second line is in the title's type; what still overflows is squeezed to the box
+    assert re.search(r'<text class="t"[^>]*>approve_</text><text class="t"[^>]*textLength[^>]*>transaction_after_review</text>', page)
