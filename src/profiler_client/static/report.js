@@ -445,6 +445,11 @@ const SHEET = HEAD + `
     <h3>How your workflow runs</h3>
     <div class="mapbox" data-r="map"></div>
     <p class="why" data-r="mapWhy"></p>
+    <div class="stepsof" data-r="stepsOf" hidden>
+      <h4 data-r="stepsOfName"></h4>
+      <div class="mapbox" data-r="stepMap"></div>
+      <p class="why" data-r="stepWhy"></p>
+    </div>
     <div class="events" data-r="events" hidden></div>
   </section>
   <section class="first" data-r="firstSection" hidden>
@@ -616,6 +621,250 @@ function wireMarks(q, data, marks) {
   }
 }
 
+// ---- the agent map: a workflow that runs through more than one agent opens with one box per agent and
+// one per LLM decision between them, at the positions graph.agent_graph.layout worked out. Selecting a box
+// fills the details panel; the busiest boxes are numbered hot spots, with a button each under the map.
+const AM_FILL = [0.05, 0.15, 0.3];  // four fill steps by share of spend: under 5%, 5-15%, 15-30%, 30% and over
+const AM_HOT = 5, AM_HOT_MIN = 0.05;
+const fillOf = s => AM_FILL.filter(t => (s || 0) >= t).length;
+// a name on lines of at most `max` characters, broken after a hyphen or an underscore; never cut
+const wrapName = (name, max) => {
+  const lines = [];
+  let cur = '';
+  for (const part of String(name).split(/(?<=[-_ ])/)) {
+    if (cur && (cur + part).length > max) { lines.push(cur); cur = part; } else cur += part;
+  }
+  return [...lines, cur];
+};
+const amPct = s => { const p = 100 * (s || 0); return p > 0 && p < 1 ? '<1%' : `${Math.round(p)}%`; };
+
+function agentMapModel(data) {
+  const ag = data.graph.agent_graph, nodes = data.graph.nodes || [];
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const marks = marksOf(data, byId);
+  const hosted = ag.agents.some(a => HAS_HASH.test(a.id));
+  const agentNo = new Map(ag.agents.map((a, i) => [a.id, i + 1]));
+  const agentName = id => hosted ? `Agent ${agentNo.get(id)}` : id;
+  const stepTitle = id => String(id).startsWith(LLM_AFTER) ? `LLM call after ${plainName(String(id).slice(LLM_AFTER.length))}` : plainName(id);
+  const items = new Map();
+  for (const a of ag.agents) {
+    const kinds = new Set(a.step_ids.flatMap(s => [...(marks.get(s)?.kinds || [])]));
+    items.set(a.id, { id: a.id, type: 'agent', name: agentName(a.id), sub: hosted ? plainName(a.id) : '', share: a.share, cost: a.cost, kinds, a });
+  }
+  for (const d of ag.decisions) {
+    // a pseudonymous decision is named after the agents whose results it reads
+    const reads = ag.links.filter(x => x.kind === 'reads' && x.decision === d.id).map(x => agentNo.get(x.from_agent)).sort((x, y) => x - y);
+    const name = hosted && HAS_HASH.test(d.id) && reads.length ? `After Agent${reads.length > 1 ? 's' : ''} ${reads.join(' + ')}` : stepTitle(d.id);
+    items.set(d.id, { id: d.id, type: 'decision', name, sub: name === stepTitle(d.id) ? '' : plainName(d.id), share: d.share, cost: d.cost, kinds: new Set(marks.get(d.id)?.kinds || []), d });
+  }
+  // findings, each with the server's next step for it (risk and what to do) where there is one
+  const steps = data.summary?.next_steps || [];
+  const findings = (data.summary?.opportunities || []).map(o => ({ ...o, next: steps.find(n => n.type === o.type && rowOf(n) === rowOf(o)) }));
+  for (const n of steps) if (!findings.some(o => o.next === n)) findings.push({ ...n, next: n });
+  const agentOfStep = step => [...new Set(nodes.filter(n => stepOf(n) === step && n.agent).map(n => n.agent))];
+  for (const it of items.values()) {
+    const once = new Map();
+    it.findings = findings.filter(o => {
+      const on = findingNodes(o);
+      if (it.type === 'decision') return on.includes(it.id);
+      const mine = new Set(it.a.step_ids.map(s => stepOf(byId.get(s) || { id: s })));
+      return on.some(s => mine.has(s)) && (!o.identity?.agent || o.identity.agent === it.id || sharedBy(o).includes(it.id));
+    }).filter(o => {
+      const key = `${o.type} ${(o.nodes || [o.title]).join(' ')}`, was = once.get(key);
+      if (was) { was.observations = (was.observations || 0) + (o.observations || 0); return false; }
+      once.set(key, o = { ...o });
+      return true;
+    }).map(o => once.get(`${o.type} ${(o.nodes || [o.title]).join(' ')}`));
+    it.investigate = it.findings.some(o => o.next?.step === 'investigate') || it.kinds.has('unstable');
+  }
+  // hot spots: the five largest shares of spend at 5% or more, and anything to investigate; the router's
+  // own box holds its decisions' spend too, so it is never one
+  const ranked = [...items.values()].filter(it => it.id !== ag.router).sort((x, y) => (y.share || 0) - (x.share || 0) || x.id.localeCompare(y.id));
+  const top = new Set(ranked.filter(it => (it.share || 0) >= AM_HOT_MIN).slice(0, AM_HOT));
+  const hot = ranked.filter(it => top.has(it) || it.investigate);
+  hot.forEach((it, i) => { it.hot = i + 1; });
+  // where a finding's step is on the agent map: its decision box, else its agent's box
+  const where = step => items.has(step) ? step : agentOfStep(step).find(a => items.has(a));
+  return { ag, byId, marks, items, hot, hosted, agentName, decisionName: id => items.get(id)?.name || stepTitle(id), where };
+}
+
+function renderAgentMap(q, data, m) {
+  const { ag, items, hot } = m, L = ag.layout, runs = data.graph.run_count || 0;
+  const rank = new Map(ag.agents.map(a => [a.id, a.rank]));
+  const linkText = x => {
+    if (x.kind === 'reads') return '';
+    if (x.mode === 'return' && x.loop) return `back: ${runPct(x.loop.share_of_runs)} of runs, ${x.loop.passes} passes`;
+    // a route past agents that run in between: say which it skips
+    const from = x.kind === 'handoff' ? Math.max(-1, ...ag.links.filter(l => l.kind === 'reads' && l.decision === x.decision).map(l => rank.get(l.from_agent) ?? -1)) : rank.get(x.from_agent);
+    const skipped = ag.agents.filter(a => a.id !== ag.router && a.rank > from && a.rank < rank.get(x.to_agent));
+    const skip = skipped.length === 1 ? ` skip ${m.agentName(skipped[0].id)}` : skipped.length > 1 ? ` skip ${skipped.length} agents` : '';
+    return [amPct(x.share), skip];
+  };
+  const routes = L.routes.map(r => {
+    const links = r.links.map(i => ag.links[i]);
+    const main = links.find(x => x.kind !== 'reads') || links[0];
+    const cls = `edge ${main.kind}${main.mode === 'return' ? ' return' : ''}`;
+    const w = main.kind === 'reads' ? 1.5 : 1.5 + 3 * Math.min(1, main.share || 0);
+    const pts = r.points, d = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x},${y}`).join(' ');
+    const text = linkText(main), [pct, skip] = Array.isArray(text) ? text : [text, ''];
+    let label = '';
+    if (main.mode === 'return') {  // left of its longest vertical stretch, on three lines
+      const [[ax, ay], [, by]] = pts.slice(1).map((p, i) => [pts[i], p]).filter(([a, b]) => a[0] === b[0]).sort(([a, b], [c, d]) => Math.abs(d[1] - c[1]) - Math.abs(b[1] - a[1]))[0] || [pts[0], pts[1]];
+      const words = main.loop ? ['back', `${runPct(main.loop.share_of_runs)} of runs`, `${main.loop.passes} passes`] : ['back', pct];
+      label = `<text class="edge-n" x="${ax - 8}" y="${(ay + by) / 2 - 8 * (words.length - 1)}" text-anchor="end">${words.map((w, i) => `<tspan x="${ax - 8}" dy="${i ? 16 : 0}">${esc(w)}</tspan>`).join('')}</text>`;
+    } else if (pct) {  // beside the last stretch into the box it goes to
+      const [x1, y1] = pts[pts.length - 2], [x2, y2] = pts[pts.length - 1];
+      label = x1 === x2
+        ? `<text class="edge-n" x="${x2 + 4}" y="${y2 + (y2 > y1 ? -10 : 18)}">${esc(pct)}</text>`
+        : `<text class="edge-n" x="${x2 + (x2 > x1 ? -10 : 10)}" y="${y2 - 6}" text-anchor="${x2 > x1 ? 'end' : 'start'}">${esc(pct)}</text>`;
+    }
+    const title = `${main.kind === 'reads' ? `${m.decisionName(main.decision)} reads ${m.agentName(main.from_agent)}'s result`
+      : `${main.kind === 'handoff' ? m.decisionName(main.decision) : m.agentName(main.from_agent)} ${main.mode === 'return' ? 'hands back' : 'hands over'} to ${m.agentName(main.to_agent)}`} in ${plural(main.runs, 'run')}${skip ? `, past ${skip.replace(' skip ', '')}` : ''}`;
+    return `<path class="${cls}" d="${d}" stroke-width="${w.toFixed(1)}" marker-end="url(#amArrow)"><title>${esc(title)}</title></path>${label}`;
+  });
+  const frames = L.frames.map(f => `<g class="together"><rect x="${f.x}" y="${f.y}" width="${f.w}" height="${f.h}" rx="8"/>` +
+    `<text x="${f.x + 8}" y="${f.y + f.h - 7}">run together</text></g>`);
+  const markWords = it => Object.keys(MARK).filter(k => it.kinds.has(k)).map(k => MARK[k].badge).join(', ');
+  const boxes = L.boxes.map(b => {
+    const it = items.get(b.id);
+    if (b.kind === 'router') {
+      return `<g class="am router" data-an="${esc(b.id)}" tabindex="0" role="button" aria-label="${esc(`${it.name}, routes the run: ${amPct(it.share)} of spend`)}">` +
+        `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="6"/><text class="t" x="${b.x + 12}" y="${b.y + 21}">${esc(it.name)}` +
+        `${it.sub ? ` <tspan class="s">${esc(it.sub)}</tspan>` : ''} <tspan class="s">routes the run · its decisions below</tspan></text></g>`;
+    }
+    const f = fillOf(it.share), cls = `am ${b.kind} f${f}${it.kinds.has('unstable') ? ' unstable' : ''}${it.hot ? ' hotspot' : ''}`;
+    const label = `${it.hot ? `Hot spot ${it.hot}: ` : ''}${it.name}${it.sub ? ` (${it.sub})` : ''}, ${amPct(it.share)} of spend${markWords(it) ? `, ${markWords(it)}` : ''}`;
+    const open = `<g class="${cls}" data-an="${esc(b.id)}" tabindex="0" role="button" aria-label="${esc(label)}"><title>${esc(b.id)}</title>` +
+      `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="${b.kind === 'chip' ? 4 : 6}"/>`;
+    if (b.kind === 'chip') {
+      return open + `<text class="c" x="${b.x + 6}" y="${b.y + b.h - 6}" textLength="${b.w - 12}" lengthAdjust="spacingAndGlyphs">${esc(`${it.hot ? `${it.hot} · ` : ''}${it.name} · ${amPct(it.share)}`)}</text></g>`;
+    }
+    const left = b.x + (it.hot ? 34 : 12), inner = b.x + b.w - 8 - left, max = Math.floor(inner / 7);
+    const lines = it.sub ? [it.name, it.sub] : wrapName(it.name, max).slice(0, 2);
+    if (!it.sub && wrapName(it.name, max).length > 2) lines[1] = wrapName(it.name, max).slice(1).join('');
+    const text = lines.map((t, i) => `<text class="${it.sub && i ? 's' : 't'}" x="${left}" y="${b.y + 18 + 15 * i}"${t.length > max ? ` textLength="${inner}" lengthAdjust="spacingAndGlyphs"` : ''}>${esc(t)}</text>`).join('');
+    const figures = b.kind === 'decision' ? `${amPct(it.share)} · ${money(it.cost)}` : `${amPct(it.share)} · ${plural(it.a.steps, 'step')}`;
+    const words = markWords(it);
+    return open + (it.hot ? `<circle class="no" cx="${b.x + 18}" cy="${b.y + 18}" r="11"/><text class="no" x="${b.x + 18}" y="${b.y + 22}" text-anchor="middle">${it.hot}</text>` : '') +
+      text + `<text class="f" x="${left}" y="${b.y + 51}">${esc(figures)}</text>` +
+      (words ? `<text class="w" x="${left}" y="${b.y + b.h - 7}"${words.length > max + 2 ? ` textLength="${inner}" lengthAdjust="spacingAndGlyphs"` : ''}>${esc(words)}</text>` : '') + '</g>';
+  });
+  const ARROW = 'markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" viewBox="0 0 10 10" refX="9" refY="5" orient="auto-start-reverse"';
+  const hidden = ag.links.filter(x => x.kind !== 'reads' && (x.share || 0) < 0.1).length;
+  const legend = '<p class="legend"><span><i class="sw f0"></i><i class="sw f1"></i><i class="sw f2"></i><i class="sw f3"></i>Share of spend: under 5%, 5–15%, 15–30%, 30% and over (also printed in each box)</span>' +
+    '<span><i class="sw no">1</i>Hot spot, by share of spend</span><span><i class="sw dash"></i>Unstable result</span><span><svg class="ln" width="28" height="8" aria-hidden="true"><path d="M0,4 H28"/></svg>Hands back to an earlier agent</span>' +
+    (hidden ? `<span>${esc(`${plural(hidden, 'route')} taken by under 10% of runs ${hidden === 1 ? 'is' : 'are'} not drawn; ${hidden === 1 ? 'it is' : 'they are'} in the details`)}</span>` : '') + '</p>';
+  const buttons = hot.length ? `<div class="hotspots"><h4>Hot spots</h4><ol>${hot.map(it => {
+    const what = it.findings.length ? it.findings.map(o => TITLE[o.type] || o.type).filter((t, i, a) => a.indexOf(t) === i).join('; ') : 'no finding';
+    return `<li><button type="button" data-an="${esc(it.id)}"><b>${it.hot}</b> <span>${esc(it.name)}${it.sub ? ` <span class="h">${esc(it.sub)}</span>` : ''}</span><span class="k">${esc(`${amPct(it.share)} of spend · ${what}`)}</span></button></li>`;
+  }).join('')}</ol></div>` : '';
+  q('map').innerHTML = `<div class="agentmap"><div class="ammain"><div class="mapscroll"><svg viewBox="0 0 ${L.width} ${L.height}" style="max-width:${L.width}px;min-width:${Math.round(L.width * MAP_MIN_SCALE)}px" ` +
+    `role="group" aria-label="${esc(`Agent map: ${plural(ag.agents.length, 'agent')} and ${plural(ag.decisions.length, 'decision')} between them, across ${plural(runs, 'run')}`)}">` +
+    `<defs><marker id="amArrow" ${ARROW}><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>` +
+    frames.join('') + routes.join('') + boxes.join('') + `</svg></div>${legend}</div></div>` +
+    `<div class="amunder">${buttons}<aside class="ampanel" data-r="amPanel" aria-live="polite"></aside></div>`;
+  q('mapWhy').textContent = 'Each box is one agent, or one LLM call that decides which agent runs next. ' +
+    'Links come from the trace: which result a decision read, and which agent it started. A % on a link is the share of runs reaching where it starts that take it.';
+}
+
+function agentPanel(q, data, m, id, showEvent) {
+  const it = m.items.get(id), ag = m.ag, runs = data.graph.run_count || 0, labels = data.summary?.risk_labels || {};
+  if (!it) return;
+  const routes = links => links.length ? `<ul class="routes">${links.map(x => {
+    const to = m.agentName(x.to_agent), how = x.mode === 'return' ? 'back to' : x.mode === 'both' ? 'together with another agent, to' : 'to';
+    return `<li>${esc(`${how} ${to}: ${plural(x.runs, 'run')} (${amPct(x.share)})${x.loop ? `, ${x.loop.passes} passes each` : ''}${(x.share || 0) < 0.1 ? ' · not drawn: under 10% of runs' : ''}`)}</li>`;
+  }).join('')}</ul>` : '<p class="k">It hands over to no other agent.</p>';
+  const finds = it.findings.length ? `<ul class="finds">${it.findings.map(o => {
+    const ev = (EVIDENCE[o.type] || (k => plural(k, 'call') + ' seen.'))(o.observations);
+    const peers = sharedBy(o).filter(a => a !== id);
+    return `<li><b>${esc(TITLE[o.type] || o.type)}</b> <span class="where">${(o.nodes || [o.title]).map(stepName).join(' → ')}</span>` +
+      `<span>${esc(ev)}${peers.length ? esc(` Also made by ${peers.map(m.agentName).join(', ')}.`) : ''}</span>` +
+      (o.next ? `<span class="k">${esc(riskLine(o.next, labels))}</span>` : '') + '</li>';
+  }).join('')}</ul>` : '<p class="k">No finding on this one.</p>';
+  let html;
+  if (it.type === 'decision') {
+    html = `<p class="kind">LLM decision</p><h4>${esc(it.name)}</h4>` +
+      `<p>${esc(`Made by ${m.agentName(it.d.agent)}: ${plural(it.d.calls, 'call')}, ${money(it.cost)}, ${amPct(it.share)} of spend.`)}</p>` +
+      `<h5>Findings</h5>${finds}<h5>Where it sends the run</h5>${routes(ag.links.filter(x => x.kind === 'handoff' && x.decision === id))}` +
+      `<p class="acts"><button type="button" class="btn" data-act="evidence">See the evidence</button>${showEvent ? '<button type="button" class="btn" data-act="calls">Show the calls</button>' : ''}</p>`;
+  } else {
+    const a = it.a, when = a.runs >= runs ? 'in every run' : `in ${plural(a.runs, 'run')} of ${count(runs)} (${amPct(a.runs / (runs || 1))})`;
+    const along = a.alongside.length ? `, alongside ${a.alongside.map(m.agentName).join(' and ')}` : '';
+    const stepsOf = a.step_ids.map(s => m.byId.get(s)).filter(Boolean).sort((x, y) => (y.occurrences || 0) - (x.occurrences || 0));
+    const direct = ag.links.filter(x => x.kind === 'direct' && x.from_agent === id);
+    html = `<p class="kind">${id === ag.router ? 'Agent that routes the run' : 'Agent'}</p><h4>${esc(it.name)}${it.sub ? ` <span class="h">${esc(it.sub)}</span>` : ''}</h4>` +
+      `<p>${esc(`Runs ${when}${along}. ${plural(a.steps, 'step')}, ${money(it.cost)}, ${amPct(it.share)} of spend.`)}</p>` +
+      `<h5>Findings on its steps</h5>${finds}` +
+      (direct.length ? `<h5>Hands over without an LLM decision</h5>${routes(direct)}` : '') +
+      `<h5>Its steps</h5><ul class="steplist">${stepsOf.map(n => `<li>${stepName(stepOf(n))} <span class="k">${esc(plural(n.occurrences, 'call'))}</span></li>`).join('')}</ul>` +
+      `<p class="acts"><button type="button" class="btn" data-act="steps">Open this agent's steps</button></p>`;
+  }
+  q('amPanel').innerHTML = html;
+  q('amPanel').dataset.an = id;
+}
+
+// the per-agent step map, under the agent map: today's map, limited to one agent's steps
+function renderAgentSteps(q, data, m, id, showEvent, all = false) {
+  // links from other agents start at the map's "Prompt", links to them end at its "Reply"
+  const mine = new Set(m.items.get(id).a.step_ids), ends = new Map();
+  for (const e of data.graph.edges) {
+    const from = mine.has(e.from) ? e.from : '@prompt', to = mine.has(e.to) ? e.to : '@reply';
+    if (from === '@prompt' && to === '@reply') continue;
+    const key = `${from} ${to}`, was = ends.get(key);
+    ends.set(key, was ? { ...was, transition_count: was.transition_count + e.transition_count, distinct_run_count: was.distinct_run_count + e.distinct_run_count }
+      : from === e.from && to === e.to ? e : { from, to, kind: e.kind, transition_count: e.transition_count, distinct_run_count: e.distinct_run_count });
+  }
+  const graph = { ...data.graph, nodes: data.graph.nodes.filter(n => mine.has(n.id)), edges: [...ends.values()].sort((x, y) => y.transition_count - x.transition_count) };
+  const sub = k => q({ map: 'stepMap', mapWhy: 'stepWhy' }[k] || k);
+  q('stepsOf').hidden = false;
+  q('stepsOfName').textContent = `${m.items.get(id).name}${m.items.get(id).sub ? ` (${m.items.get(id).sub})` : ''}: its steps`;
+  const marks = renderMap(sub, { ...data, graph }, all);
+  const svg = q('stepMap').querySelector('svg');  // a few steps: drawn at their natural size, never stretched
+  if (svg) svg.style.maxWidth = `${svg.viewBox.baseVal.width}px`;
+  if (showEvent) wireEvents(sub, { ...data, graph }, showEvent);
+  wireMarks(sub, data, marks);
+  q('stepMap').onclick = e => {  // its own "show all links" control
+    const b = e.target.closest('button[data-map]');
+    if (b) renderAgentSteps(q, data, m, id, showEvent, b.dataset.map === 'all');
+  };
+}
+
+function wireAgentMap(q, data, m, showEvent) {
+  const select = id => {
+    q('map').querySelectorAll('[data-an]').forEach(g => {
+      const on = g.dataset.an === id;
+      g.classList.toggle('sel', on);
+      if (g.tagName.toLowerCase() === 'g' || g.tagName === 'BUTTON') g.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    agentPanel(q, data, m, id, showEvent);
+  };
+  q('map').addEventListener('click', e => {
+    const t = e.target.closest('[data-an]');
+    if (t && !t.closest('.ampanel')) select(t.dataset.an);
+    const act = e.target.closest('button[data-act]');
+    if (!act) return;
+    const id = q('amPanel').dataset.an, it = m.items.get(id);
+    if (act.dataset.act === 'steps') { renderAgentSteps(q, data, m, id, showEvent); q('stepsOf').scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+    if (act.dataset.act === 'evidence') {  // its rows in the table below
+      const rows = [...q('steps').querySelectorAll('tr[data-node]')].filter(tr => tr.dataset.node === stepOf(m.byId.get(id) || { id }));
+      q('steps').querySelectorAll('tr.hl').forEach(tr => tr.classList.remove('hl'));
+      rows.forEach(tr => tr.classList.add('hl'));
+      rows[0]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+    if (act.dataset.act === 'calls') {
+      const owner = it.d?.agent;
+      if (owner) { renderAgentSteps(q, data, m, owner, showEvent); q('stepMap').querySelector(`g[data-node="${CSS.escape(id)}"]`)?.dispatchEvent(new MouseEvent('click')); q('events').scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    }
+  });
+  q('map').addEventListener('keydown', e => {
+    const g = e.target.closest('g[data-an]');
+    if (g && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); select(g.dataset.an); }
+  });
+  const first = m.hot[0]?.id || m.ag.decisions[0]?.id || m.ag.agents[0].id;
+  select(first);
+  return select;
+}
+
 function renderHead(q, g, name, meta) {
   q('name').textContent = plainName(name);  // a pseudonym shows as its first 7 characters
   q('meta').textContent = [...meta, g && `dataset grade ${g.grade} (${String(g.word || '').toLowerCase()})`].filter(Boolean).join(' · ');
@@ -629,7 +878,16 @@ function renderReport(root, data, { name = '', meta = [], showEvent = null } = {
   const sm = data.summary || {}, t = sm.totals || {}, g = data.grade;
   renderHead(q, g, name, meta);
   // the map, its wiring and the cards that point at it, drawn again when the reader shows all links or fewer
+  const am = data.availability?.graph?.available && data.graph?.agent_graph?.layout ? agentMapModel(data) : null;
+  let selectAgent = null;
   const drawMap = all => {
+    if (am) {
+      renderAgentMap(q, data, am);
+      selectAgent = wireAgentMap(q, data, am, showEvent);
+      const onMap = new Set(data.graph.nodes.flatMap(n => [n.id, stepOf(n)]).filter(s => am.where(s)));
+      renderFirst(q, data, onMap);
+      return;
+    }
     const marks = renderMap(q, data, all);
     if (showEvent) wireEvents(q, data, showEvent);
     wireMarks(q, data, marks);
@@ -647,7 +905,9 @@ function renderReport(root, data, { name = '', meta = [], showEvent = null } = {
   q('first').addEventListener('click', e => {
     const b = e.target.closest('button[data-first]');
     if (!b) return;
-    pickOnMap(q, new Set(findingNodes(data.summary.next_steps[b.dataset.first])));
+    const on = findingNodes(data.summary.next_steps[b.dataset.first]);
+    if (am) selectAgent(on.map(am.where).find(Boolean));
+    else pickOnMap(q, new Set(on));
     q('map').scrollIntoView({ block: 'center', behavior: 'smooth' });
   });
   q('totals').innerHTML = `${money(t.cost)} <span class="k">across</span> ${plural(t.runs, 'run')}<span class="k">,</span> ` +

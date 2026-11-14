@@ -39,9 +39,11 @@ deciding). A handoff or direct link has a ``mode``: "both" (it mostly starts
 that agent together with another), "return" (it mostly re-enters an agent
 that already ran; ``loop`` as above) or "either" (anything else, a single
 route included), and its ``share`` of the runs that reach where it starts.
+A "reads" link's ``share`` is of all the workflow's runs.
 An agent's ``rank`` is its place from the start of the run, ignoring return
 links and the router: the agent owning the decisions behind at least half
-of the handoffs, if one does (``router``).
+of the handoffs, if one does (``router``). ``layout`` is where the agent map
+draws it all (``agent_map.layout``; None with one agent).
 
 When no event carries an id (a contract v1 dataset), or ids exist but no
 parent resolves to one, the graph is unavailable and says why.
@@ -50,6 +52,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
+from .agent_map import layout
 from .contract import TraceEvent
 from .evidence import evidence_sample
 
@@ -230,7 +233,8 @@ def _agent_graph(events: list[TraceEvent], node: dict[int, str], by_id: dict[str
     for (source, target), children in links.items():
         if kinds[(source, target)] == "reads_result" and target in owner and source in agent_of:
             read[(agent_of[source], target)] |= {c.run_id for c in children}
-    out_links = [{"kind": "reads", "from_agent": a, "decision": d, "runs": len(r)} for (a, d), r in sorted(read.items())]
+    out_links = [{"kind": "reads", "from_agent": a, "decision": d, "runs": len(r),
+                  "share": round(len(r) / h["run_count"], 3)} for (a, d), r in sorted(read.items())]
     for (start, agent), x in sorted(handed.items()):
         link = {"kind": "handoff", "decision": start} if start in owner else {"kind": "direct", "from_agent": start}
         link["to_agent"] = agent
@@ -259,13 +263,15 @@ def _agent_graph(events: list[TraceEvent], node: dict[int, str], by_id: dict[str
                "cost": round(cost[a], 6), "share": share(cost[a]), "rank": rank.get(a),
                "alongside": sorted(alongside[a])}
               for a in sorted(runs, key=lambda a: (rank.get(a, -1), -len(runs[a]), a))]
-    return {
+    out = {
         "router": router,
         "agents": agents,
         "decisions": [{"id": d, "agent": owner[d], "calls": calls[d], "cost": round(dcost[d], 6),
                        "share": share(dcost[d])} for d in decisions],
         "links": out_links,
     }
+    out["layout"] = layout(out)
+    return out
 
 
 def _crosses(child: TraceEvent, by_id: dict[str, TraceEvent]) -> bool:

@@ -187,6 +187,8 @@ def _workflow_view(report: dict) -> dict:
                        "evidence_sample": [{"event_id": x["event_id"]} for x in _list(e.get("evidence_sample"))
                                            if isinstance(x, dict) and TOKEN.fullmatch(str(x.get("event_id")))]}
                       for e in _list(graph.get("edges"))],
+            # agents, decisions and how they link: ids, counts, costs and the map's positions only
+            "agent_graph": _pick(graph.get("agent_graph"), ("router", "agents", "decisions", "links", "layout")) or None,
         } if isinstance(graph, dict) else None,
         "data_quality": {"gaps": [_pick(g, ("key", "label", "effect"))
                                   for g in _list(_pick(report.get("data_quality"), ("gaps",)).get("gaps"))]},
@@ -212,7 +214,7 @@ def render_html(report: dict, title: str, restored: int | None = None, unmatched
 <title>{html.escape(TOKEN.sub(lambda m: m.group(0)[:9], title))}</title>
 <style>
   body {{ margin: 0; background: #f4f5f8; }}
-  main {{ max-width: 1000px; margin: 0 auto; padding: 32px 16px 48px; }}
+  main {{ max-width: 1180px; margin: 0 auto; padding: 32px 16px 48px; }}
   .btn {{ background: transparent; color: #3a3e9e; border: 0; box-shadow: inset 0 0 0 1.5px #3a3e9e; border-radius: 6px;
          padding: 6px 12px; font: 600 14px/1.2 "Helvetica Neue", Arial, sans-serif; cursor: pointer; }}
   @media print {{ body {{ background: #fff; }} main {{ padding: 0; max-width: none; }} }}
