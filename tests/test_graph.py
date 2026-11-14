@@ -62,3 +62,34 @@ def test_what_an_llm_call_read_and_whether_it_replied_close_the_loop():
     # with links of unknown meaning, no run is said to end in a reply
     unspecified = build_graph(events, "wf", "unspecified")["graph"]
     assert all(e["kind"] != "ends" for e in unspecified["edges"])
+
+
+def _agent_ev(run, eid, agent, node, parent=None):
+    return TraceEvent(trace_id="t", run_id=run, workflow="wf", agent=agent, event_type="tool_call",
+                      node=node, event_id=eid, parent=parent)
+
+
+def test_each_agent_gets_its_own_box_and_handoffs_say_fork_branch_or_loop():
+    # r1, r2: the router starts fraud and credit together (both look up the balance), then letter
+    # r3: the router starts docs alone, docs hands back to kyc, which ran before (a loop), then letter
+    events = []
+    for run in ("r1", "r2"):
+        events += [_agent_ev(run, f"{run}k", "kyc", "kyc_lookup"), _agent_ev(run, f"{run}r", "sup", "route"),
+                   _agent_ev(run, f"{run}f", "fraud", "balance", f"{run}r"),
+                   _agent_ev(run, f"{run}c", "credit", "balance", f"{run}r"),
+                   _agent_ev(run, f"{run}s", "credit", "score", f"{run}c")]
+    events += [_agent_ev("r3", "k1", "kyc", "kyc_lookup"), _agent_ev("r3", "r", "sup", "route"),
+               _agent_ev("r3", "d", "docs", "validate", "r"), _agent_ev("r3", "k2", "kyc", "kyc_lookup", "d")]
+    graph = build_graph(events, "wf", "invokes")["graph"]
+    assert graph["version"] == 2
+    nodes = {n["id"]: n for n in graph["nodes"]}
+    # the balance lookup is one box per agent; a step only one agent uses keeps its name
+    assert nodes["balance @ fraud"]["agent"] == "fraud" and nodes["balance @ fraud"]["step"] == "balance"
+    assert nodes["balance @ credit"]["occurrences"] == 2 and "step" not in nodes["score"]
+    edges = {(e["from"], e["to"]): e for e in graph["edges"]}
+    assert edges[("balance @ credit", "score")].keys().isdisjoint({"fork", "loop"})  # within one agent
+    assert edges[("route", "balance @ fraud")]["fork"] == {"mode": "both", "share_of_runs": 0.667}
+    assert edges[("route", "balance @ credit")]["fork"] == {"mode": "both", "share_of_runs": 0.667}
+    assert edges[("route", "validate")]["fork"] == {"mode": "either", "share_of_runs": 0.333}
+    assert edges[("validate", "kyc_lookup")]["loop"] == {"runs": 1, "share_of_runs": 0.333, "passes": 1.0}
+    assert "loop" not in edges[("route", "validate")]  # docs had not run before

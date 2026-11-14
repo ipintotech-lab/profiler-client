@@ -11,7 +11,7 @@ from profiler_client.dataset import EVENTS, PrepareError, prepare, read_sealed, 
 from profiler_client.lint import check_event
 from profiler_client.names import Names
 from profiler_client.pseudonym import Pseudonymizer, load_or_create_key, new_key
-from profiler_client.report import STATIC, view, write_name_list
+from profiler_client.report import STATIC, translate, view, write_name_list
 
 
 def _events(rows, key=b"k" * 32):
@@ -442,6 +442,31 @@ def test_open_keeps_each_map_steps_agent_with_its_name_restored(tmp_path, monkey
     assert '"agent": "fraud-screening"' in rendered or '"agent":"fraud-screening"' in rendered
     assert agent_token not in rendered and "dropped" not in rendered
 
+
+
+def test_open_keeps_a_per_agent_box_and_how_agents_hand_over(tmp_path, monkeypatch):
+    # a step two agents use is one box per agent ("<step> @ <agent>"); both names are restored inside the id
+    payload_hash, step_token, agent_token = "d" * 64, "h:" + "7" * 64, "h:" + "8" * 64
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    write_name_list(payload_hash, {step_token: "get_balance", agent_token: "fraud-screening"},
+                    tmp_path / "profiler-client" / "names")
+    box = f"{step_token} @ {agent_token}"
+    source = tmp_path / "report.json"
+    source.write_text(json.dumps({"payload_sha256": payload_hash, "graph": {"run_count": 3, "nodes": [
+        {"id": box, "step": step_token, "kind": "step", "agent": agent_token, "occurrences": 2, "cost": 0}], "edges": [
+        {"from": "route", "to": box, "kind": "invokes", "transition_count": 2, "distinct_run_count": 2,
+         "fork": {"mode": "both", "share_of_runs": 0.667}, "loop": {"runs": 1, "share_of_runs": 0.333, "passes": 1.0},
+         "extra": "dropped"}]}}))
+    graph = view(translate(json.loads(source.read_text()), {step_token: "get_balance", agent_token: "fraud-screening"},
+                           set(), set()))["graph"]
+    assert graph["nodes"][0]["id"] == "get_balance @ fraud-screening" and graph["nodes"][0]["step"] == "get_balance"
+    edge = graph["edges"][0]
+    assert edge["fork"] == {"mode": "both", "share_of_runs": 0.667} and edge["loop"]["passes"] == 1.0
+    assert "extra" not in edge
+    output = tmp_path / "report.html"
+    assert cli.main(["open", str(source), "-o", str(output)]) == 0
+    rendered = output.read_text()
+    assert "get_balance @ fraud-screening" in rendered and step_token not in rendered and agent_token not in rendered
 
 def test_open_keeps_the_headline_and_next_steps_but_no_input_slice(tmp_path, monkeypatch):
     # "do these first" names steps (restored on this machine); a region's slice is an input value, never written
