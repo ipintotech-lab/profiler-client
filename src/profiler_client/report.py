@@ -154,14 +154,17 @@ def _workflow_view(report: dict) -> dict:
     summary = _pick(report.get("summary"), ("totals", "notes", "replaceable", "risk_labels"))
     if "next_steps" in _pick(report.get("summary"), ("next_steps",)):
         summary["next_steps"] = [
-            _pick(n, ("step", "do", "type", "title", "nodes", "saving", "risk", "risk_reasons", "observations"))
+            _pick(n, ("step", "do", "type", "title", "nodes", "saving", "risk", "risk_reasons", "observations", "lookup_entries"))
             for n in _list(report["summary"]["next_steps"]) if isinstance(n, dict)]
     summary["opportunities"] = [
         {**_pick(o, ("type", "nodes", "title", "saving", "observations", "action", "agents",
                      "repeated_calls", "repeated_latency_ms")),
          "identity": _pick(o.get("identity"), ("agent",)),
          # a call agents also repeat between them within a run: which agents, in how many runs
-         **({"between_agents": _pick(o["between_agents"], ("agents", "runs"))} if isinstance(o.get("between_agents"), dict) else {})}
+         **({"between_agents": _pick(o["between_agents"], ("agents", "runs"))} if isinstance(o.get("between_agents"), dict) else {}),
+         # a decision that is one lookup: how many inputs it holds, not the inputs themselves
+         **({"lookup_entries": sum(1 for b in o["by_input"] if isinstance(b, dict) and b.get("confirmed") is True)}
+            if isinstance(o.get("by_input"), list) else {})}
         for o in _list(_pick(report.get("summary"), ("opportunities",)).get("opportunities")) if isinstance(o, dict)]
     evidence = ("occurrences", "unique_inputs", "repeated_inputs", "repeated_observations", "determinism_confidence")
     by_agent = _pick(report.get("mine"), ("by_agent",)).get("by_agent")
@@ -187,6 +190,8 @@ def _workflow_view(report: dict) -> dict:
                        "evidence_sample": [{"event_id": x["event_id"]} for x in _list(e.get("evidence_sample"))
                                            if isinstance(x, dict) and TOKEN.fullmatch(str(x.get("event_id")))]}
                       for e in _list(graph.get("edges"))],
+            # agents, decisions and how they link: ids, counts, costs and the map's positions only
+            "agent_graph": _pick(graph.get("agent_graph"), ("router", "agents", "decisions", "links", "layout")) or None,
         } if isinstance(graph, dict) else None,
         "data_quality": {"gaps": [_pick(g, ("key", "label", "effect"))
                                   for g in _list(_pick(report.get("data_quality"), ("gaps",)).get("gaps"))]},
@@ -212,7 +217,7 @@ def render_html(report: dict, title: str, restored: int | None = None, unmatched
 <title>{html.escape(TOKEN.sub(lambda m: m.group(0)[:9], title))}</title>
 <style>
   body {{ margin: 0; background: #f4f5f8; }}
-  main {{ max-width: 1000px; margin: 0 auto; padding: 32px 16px 48px; }}
+  main {{ max-width: 1180px; margin: 0 auto; padding: 32px 16px 48px; }}
   .btn {{ background: transparent; color: #3a3e9e; border: 0; box-shadow: inset 0 0 0 1.5px #3a3e9e; border-radius: 6px;
          padding: 6px 12px; font: 600 14px/1.2 "Helvetica Neue", Arial, sans-serif; cursor: pointer; }}
   @media print {{ body {{ background: #fff; }} main {{ padding: 0; max-width: none; }} }}

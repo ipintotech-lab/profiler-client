@@ -30,6 +30,21 @@ step. A handoff that mostly re-enters an agent that already ran earlier in
 the run is a return link: ``loop`` gives the runs that take it, their
 share, and the average passes per such run (``passes_by_run`` defines it).
 
+The agent graph (``agent_graph``) is the same graph one level up: a node
+per agent, and a decision node per LLM step that hands over to another
+agent. Its links: "reads" (a decision read that agent's result), "handoff"
+(a decision started that agent; one link per pair, never to a single tool)
+and "direct" (one agent's step started another agent with no LLM step
+deciding). A handoff or direct link has a ``mode``: "both" (it mostly starts
+that agent together with another), "return" (it mostly re-enters an agent
+that already ran; ``loop`` as above) or "either" (anything else, a single
+route included), and its ``share`` of the runs that reach where it starts.
+A "reads" link's ``share`` is of all the workflow's runs.
+An agent's ``rank`` is its place from the start of the run, ignoring return
+links and the router: the agent owning the decisions behind at least half
+of the handoffs, if one does (``router``). ``layout`` is where the agent map
+draws it all (``agent_map.layout``; None with one agent).
+
 When no event carries an id (a contract v1 dataset), or ids exist but no
 parent resolves to one, the graph is unavailable and says why.
 """
@@ -37,13 +52,14 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
+from .agent_map import layout
 from .contract import TraceEvent
 from .evidence import evidence_sample
 
 PROMPT, REPLY = "@prompt", "@reply"  # the run's start and end; real step names never start with "@"
 
 
-GRAPH_VERSION = 2  # 2: one node per agent and step; fork and loop on handoffs
+GRAPH_VERSION = 3  # 2: one node per agent and step; fork and loop on handoffs. 3: agent_graph
 
 
 def _trigger_steps(trigger: str) -> list[str]:
@@ -173,8 +189,89 @@ def build_graph(events: list[TraceEvent], workflow: str, relation: str | None) -
             "run_count": len({e.run_id for e in events}),
             "nodes": nodes,
             "edges": edges,
+            "agent_graph": _agent_graph(events, node, by_id, llm, links, kinds, handoffs),
         },
     }
+
+
+def _agent_graph(events: list[TraceEvent], node: dict[int, str], by_id: dict[str, TraceEvent], llm: set,
+                 links: dict, kinds: dict, h: dict) -> dict:
+    """The graph one level up: agents and the decisions between them (see the module docstring)."""
+    total = sum(e.cost for e in events)
+    share = (lambda cost: round(cost / total, 3) if total else 0.0)
+    runs: dict[str, set] = defaultdict(set)
+    steps: dict[str, set] = defaultdict(set)
+    cost: dict[str, float] = defaultdict(float)
+    agent_of: dict[str, str] = {}  # node id -> its agent
+    for e in events:
+        if e.agent is not None:
+            agent_of[node[id(e)]] = e.agent
+            runs[e.agent].add(e.run_id)
+            steps[e.agent].add(node[id(e)])
+            cost[e.agent] += e.cost
+    # handoffs: (start, agent) -> the calls that handed over, the runs, and the calls that re-entered
+    handed: dict[tuple[str, str], dict] = defaultdict(lambda: {"calls": set(), "runs": set(), "again": set()})
+    for e in events:
+        parent = by_id.get(e.parent) if e.parent else None
+        if parent is None or None in (parent.agent, e.agent) or parent.agent == e.agent:
+            continue
+        start = node[id(parent)] if node[id(parent)] in llm else parent.agent
+        pair = handed[(start, e.agent)]
+        pair["calls"].add(parent.event_id)
+        pair["runs"].add(e.run_id)
+        if h["reentries"][id(e)]:
+            pair["again"].add(parent.event_id)
+    decisions = sorted({start for start, _ in handed if start in llm})
+    owner = {d: next(e.agent for e in events if node[id(e)] == d) for d in decisions}
+    calls = Counter(node[id(e)] for e in events)
+    dcost: dict[str, float] = defaultdict(float)
+    for e in events:
+        dcost[node[id(e)]] += e.cost
+    runs_of = {**{a: runs[a] for a in runs}, **{d: h["runs_of_step"][d] for d in decisions}}
+
+    read: dict[tuple[str, str], set] = defaultdict(set)  # (agent, decision) -> runs in which it read the result
+    for (source, target), children in links.items():
+        if kinds[(source, target)] == "reads_result" and target in owner and source in agent_of:
+            read[(agent_of[source], target)] |= {c.run_id for c in children}
+    out_links = [{"kind": "reads", "from_agent": a, "decision": d, "runs": len(r),
+                  "share": round(len(r) / h["run_count"], 3)} for (a, d), r in sorted(read.items())]
+    for (start, agent), x in sorted(handed.items()):
+        link = {"kind": "handoff", "decision": start} if start in owner else {"kind": "direct", "from_agent": start}
+        link["to_agent"] = agent
+        targets = {t for s, t in handed if s == start}
+        together = sum(len(h["targets_of_call"][c]) > 1 for c in x["calls"])
+        if 2 * len(x["again"]) > len(x["calls"]):
+            mode = "return"
+            passes = sum(h["passes"].get((run, agent), 0) for run in x["runs"])
+            link["loop"] = {"runs": len(x["runs"]), "share_of_runs": round(len(x["runs"]) / h["run_count"], 3),
+                            "passes": round(passes / len(x["runs"]), 2)}
+        else:
+            mode = "both" if len(targets) > 1 and 2 * together > len(x["calls"]) else "either"
+        out_links.append({**link, "mode": mode, "runs": len(x["runs"]),
+                          "share": round(len(x["runs"]) / len(runs_of[start]), 3)})
+
+    alongside: dict[str, set] = defaultdict(set)
+    for d in decisions:
+        both = {x["to_agent"] for x in out_links if x.get("decision") == d and x.get("mode") == "both"}
+        for a in both:
+            alongside[a] |= both - {a}
+    weight = Counter(owner[x["decision"]] for x in out_links if x["kind"] == "handoff")
+    moves = sum(x["kind"] != "reads" for x in out_links)
+    router = next((a for a, n in weight.most_common(1) if 2 * n >= moves), None)
+    rank = _ranks(sorted(runs), out_links, router)
+    agents = [{"id": a, "runs": len(runs[a]), "steps": len(steps[a]), "step_ids": sorted(steps[a]),
+               "cost": round(cost[a], 6), "share": share(cost[a]), "rank": rank.get(a),
+               "alongside": sorted(alongside[a])}
+              for a in sorted(runs, key=lambda a: (rank.get(a, -1), -len(runs[a]), a))]
+    out = {
+        "router": router,
+        "agents": agents,
+        "decisions": [{"id": d, "agent": owner[d], "calls": calls[d], "cost": round(dcost[d], 6),
+                       "share": share(dcost[d])} for d in decisions],
+        "links": out_links,
+    }
+    out["layout"] = layout(out)
+    return out
 
 
 def _crosses(child: TraceEvent, by_id: dict[str, TraceEvent]) -> bool:
@@ -226,3 +323,26 @@ def _handoff(children: list[TraceEvent], by_id: dict[str, TraceEvent], h: dict) 
         out["loop"] = {"runs": len(runs), "share_of_runs": round(len(runs) / h["run_count"], 3),
                        "passes": round(passes / len(runs), 2)}
     return out
+
+
+def _ranks(agents: list[str], links: list[dict], router: str | None) -> dict[str, int]:
+    """Each agent's place from the start of the run: the longest chain of
+    handoffs leading to it, ignoring return links and the router."""
+    into: dict[str, set] = defaultdict(set)  # agent -> the agents whose work leads to it
+    readers: dict[str, set] = defaultdict(set)  # decision -> the agents whose result it read
+    for x in links:
+        if x["kind"] == "reads":
+            readers[x["decision"]].add(x["from_agent"])
+    for x in links:
+        if x["kind"] != "reads" and x["mode"] != "return":
+            into[x["to_agent"]] |= readers[x["decision"]] if x["kind"] == "handoff" else {x["from_agent"]}
+    rank = {a: 0 for a in agents if a != router}
+    for _ in agents:  # at most one pass per agent; a cycle left in the links stops growing there
+        changed = False
+        for a in sorted(rank):
+            best = max((rank[b] + 1 for b in into[a] if b in rank and b != a), default=0)
+            if best > rank[a] and best < len(agents):
+                rank[a], changed = best, True
+        if not changed:
+            break
+    return rank
