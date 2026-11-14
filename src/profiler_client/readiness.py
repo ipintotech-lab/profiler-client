@@ -25,6 +25,9 @@ COMPLETE_SHARE = 0.9
 # A rule finding (an LLM choice a rule could make) needs a step seen at least this often.
 MIN_BYPASS_OBSERVATIONS = 10
 
+# Duplicate work between agents is reported once it shows in at least this many runs (the server's patterns.MIN_SHARED_RUNS).
+MIN_SHARED_RUNS = 10
+
 # Below this many events, fewer rules are found (docs/e2e-synthetic/2026-11-13 in the server repo).
 SMALL_DATASET_EVENTS = 5000
 
@@ -197,6 +200,15 @@ def _share_status(statuses: list[str | None]) -> str:
     return "yes" if all(s == "ok" for s in statuses) else "limited"
 
 
+def _runs_with_agents(events: list) -> int:
+    """How many runs hold tool calls by more than one agent."""
+    agents: dict[str, set] = defaultdict(set)
+    for e in events:
+        if is_tool(e) and e.agent:
+            agents[e.run_id].add(e.agent)
+    return sum(len(a) > 1 for a in agents.values())
+
+
 def findings_possible(events: list, runs: int, prices: bool = False) -> list[dict]:
     """For each kind of finding: ``yes``, ``limited`` or ``no`` that the
     analysis can make it from these events (one workflow's), and why."""
@@ -241,11 +253,28 @@ def findings_possible(events: list, runs: int, prices: bool = False) -> list[dic
     links = ("yes", f"parent links on {linked / len(events):.0%} of events") if linked else \
         ("no", "no parent links recorded")
 
+    # the same tool call by more than one agent in a run: tool inputs, agent names and run ids
+    tool_agents = {e.agent for e in events if is_tool(e) and e.agent}
+    missing = [what for what, gone in (
+        ("tool arguments", tools[0] in (None, "missing")),
+        ("agent names on tool calls", not tool_agents),
+        (f"{MIN_SHARED_RUNS} or more runs", runs < MIN_SHARED_RUNS)) if gone]
+    if missing:
+        between = ("no", "needs " + ", ".join(missing))
+    elif len(tool_agents) < 2:
+        between = ("no", "only one agent calls tools")
+    elif not _runs_with_agents(events):
+        between = ("no", "no run id holds tool calls by more than one agent; give a whole run one run id")
+    else:
+        between = ("yes" if tools[0] == "ok" else "limited",
+                   f"{len(tool_agents)} agents call tools; tool arguments on {coverage('tool_input')}")
+
     rows = [
         ("reuse_result", "Reuse a repeated result", (tools_state, tools_reason)),
         ("rule_for_llm", "Replace an LLM decision with a rule", rule),
         ("script_sequence", "Script a fixed sequence", sequence),
         ("unstable_result", "Unstable result", (tools_state, tools_reason)),
+        ("between_agents", "Duplicate work between agents", between),
         ("workflow_map", "Workflow map", links),
         ("dollar_figures", "Dollar figures", money),
     ]
