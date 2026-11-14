@@ -19,6 +19,23 @@ conversation); a tool call records its whole input, so ``True``. With
 in its lane so far (``Names.llm_input``), and so ``True``; the transcript
 doesn't hold Claude Code's system prompt, which follows its version.
 
+Agents: the main conversation is ``claude-code``. Each subagent
+(``isSidechain`` records, written to ``subagents/agent-<agentId>.jsonl``) is
+followed on its own lane by ``agentId``, so two subagents running side by
+side don't read each other's tool results, and is named
+``claude-code-subagent:<type>``: the type from the record's
+``attributionAgent`` or the parent's Agent tool result
+(``toolUseResult.agentType``), in clear text for Claude Code's built-in
+types and a pseudonym otherwise. The same type in another run is the same
+agent. Without a type it is named by a pseudonym of its ``agentId``;
+without either, ``claude-code-subagent``.
+
+Handoff: a subagent's first LLM call has as ``parent`` the parent's Agent
+(or Task) tool call that started it -- matched through the tool result
+that reports its ``agentId`` -- so the graph draws the handoff between the
+two agents. Without that tool result (the subagent's file alone) there is
+no link.
+
 Cost: transcripts carry only a session-level ``cost-state`` record with
 real USD per model, split across that model's calls by price-weighted
 tokens. A session without one gets ``cost=0`` and is counted in
@@ -196,11 +213,78 @@ def _user_trigger(record: dict, tool_nodes_by_id: dict[str, str]) -> str:
     return "user_prompt"
 
 
-def convert_claude_code_transcript(rows: list[dict], names: Names) -> Conversion:
+@dataclass
+class Subagents:
+    """What the parent's Agent tool results say about each subagent, by
+    ``agentId``: its type and the tool call that started it. Read before
+    converting: a subagent's own file (``subagents/agent-<agentId>.jsonl``)
+    is a separate file from the parent's, so ``dataset.prepare`` reads
+    every file's first and passes them in."""
+
+    types: dict[str, str] = field(default_factory=dict)
+    started_by: dict[str, str] = field(default_factory=dict)
+    # session -> its main conversation's first cwd, which names the
+    # workflow: a subagent working in another directory is still part of it
+    roots: dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def read(cls, rows: list[dict]) -> Subagents:
+        out = cls()
+        for r in rows:
+            if r.get("type") in ("user", "assistant") and r.get("sessionId") and not r.get("isSidechain"):
+                out.roots.setdefault(str(r["sessionId"]), r.get("cwd") or "")
+            result = r.get("toolUseResult")
+            if not isinstance(result, dict) or not result.get("agentId"):
+                continue
+            agent_id = str(result["agentId"])
+            if result.get("agentType"):
+                out.types[agent_id] = str(result["agentType"])
+            message = r.get("message") if isinstance(r.get("message"), dict) else {}
+            content = message.get("content")
+            for c in content if isinstance(content, list) else []:
+                if isinstance(c, dict) and c.get("type") == "tool_result" and c.get("tool_use_id"):
+                    out.started_by.setdefault(agent_id, str(c["tool_use_id"]))
+        return out
+
+    def update(self, other: Subagents) -> None:
+        for agent_id, kind in other.types.items():
+            self.types.setdefault(agent_id, kind)
+        for agent_id, tool_id in other.started_by.items():
+            self.started_by.setdefault(agent_id, tool_id)
+        for session, cwd in other.roots.items():
+            self.roots.setdefault(session, cwd)
+
+
+def _lane(record: dict, session: str, subagents: Subagents, names: Names) -> tuple[str, str]:
+    """``(lane, agent name)``: the main conversation, or one subagent
+    followed by its ``agentId`` (see the module docstring)."""
+    if not record.get("isSidechain"):
+        return f"{session}:False", "claude-code"
+    agent_id = record.get("agentId")
+    if not agent_id:
+        return f"{session}:True", "claude-code-subagent"
+    agent_id = str(agent_id)
+    kind = record.get("attributionAgent") or subagents.types.get(agent_id)
+    if not isinstance(kind, str) or not kind:
+        name = names.token("id", ["agent", agent_id])
+    elif kind in policy.SUBAGENT_TYPES:
+        name = kind
+    else:
+        name = names.step(kind)
+    return f"{session}:agent:{agent_id}", f"{policy.SUBAGENT_PREFIX}{name}"
+
+
+def convert_claude_code_transcript(rows: list[dict], names: Names, known: Subagents | None = None) -> Conversion:
+    """``known``: what other files' Agent tool results say about subagents
+    (see ``Subagents``), added to this file's own."""
     records = list(enumerate(rows))
     rows = [r for r in rows if isinstance(r, dict)]
     namer = Namer(names)
     ps = names
+    subagents = Subagents.read(rows)
+    if known is not None:
+        subagents.update(known)
+    handed_over: set[str] = set()  # agentIds whose first LLM call is linked
     session_cost_by_model: dict[str, dict[str, float]] = defaultdict(dict)
     for r in rows:
         if r.get("type") == "cost-state":
@@ -231,14 +315,13 @@ def convert_claude_code_transcript(rows: list[dict], names: Names) -> Conversion
         record_ms = ts_ms(r)
         previous_ms = None
         if session and record_ms is not None:
-            seen_lane = f"{session}:{bool(r.get('isSidechain'))}"
+            seen_lane, _ = _lane(r, session, subagents, names)
             previous_ms = last_seen_ms.get(seen_lane)
             last_seen_ms[seen_lane] = record_ms
         if kind not in ("user", "assistant") or not session or not isinstance(r.get("message"), dict):
             continue
         sessions.add(session)
-        sidechain = bool(r.get("isSidechain"))
-        lane = f"{session}:{sidechain}"
+        lane, agent = _lane(r, session, subagents, names)
 
         if kind == "user":
             read[lane].add({"role": "user", "content": r["message"].get("content")})
@@ -264,14 +347,15 @@ def convert_claude_code_transcript(rows: list[dict], names: Names) -> Conversion
             read[lane].add({"role": "assistant", "content": message.get("content")})
             continue
 
-        # Pin the workflow to the session's first cwd so a mid-session
-        # ``cd`` doesn't split one session into several workflows.
-        cwd = session_root.setdefault(session, r.get("cwd") or "")
+        # Pin the workflow to the session's first cwd (its main
+        # conversation's, see ``Subagents.roots``) so a mid-session ``cd`` or
+        # a subagent in another directory doesn't split one session.
+        cwd = session_root.setdefault(session, subagents.roots.get(session, r.get("cwd") or ""))
         common = {
             "trace_id": ps.token("id", session),
             "run_id": ps.token("id", current_prompt.get(session, session)),
             "workflow": f"claude-code/{names.step(PurePosixPath(cwd).name or 'unknown', domain='id')}",
-            "agent": "claude-code-subagent" if sidechain else "claude-code",
+            "agent": agent,
             "workflow_version": version(r.get("version")),
         }
 
@@ -294,6 +378,12 @@ def convert_claude_code_transcript(rows: list[dict], names: Names) -> Conversion
                 "_start_ms": previous_ms,
                 "_source": [record],
             }
+            agent_id = str(r.get("agentId") or "")
+            started_by = subagents.started_by.get(agent_id) if r.get("isSidechain") else None
+            if started_by and agent_id not in handed_over:
+                # the subagent's first call: started by the parent's Agent tool call
+                call["parent"] = ps.token("id", ["tool", started_by])
+                handed_over.add(agent_id)
             llm_calls[message_id] = call
             order.append(("llm", message_id))
         usage = message.get("usage") or {}

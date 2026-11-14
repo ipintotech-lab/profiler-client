@@ -15,7 +15,10 @@ from __future__ import annotations
 #    (a pseudonym, or kept with --keep-names), instead of one for the whole input.
 # 4: with --llm-inputs, an LLM call's input is one pseudonym of everything the
 #    model read in its conversation so far (no text, only the pseudonym).
-POLICY_VERSION = "4"
+# 5: Claude Code's built-in subagent types, so a subagent's agent name says
+#    which built-in it is (``claude-code-subagent:Explore``); a custom
+#    subagent type is a pseudonym, like a custom tool.
+POLICY_VERSION = "5"
 
 # Claude Code's built-in tools. Any other tool name (MCP, custom) is a pseudonym.
 BUILTIN_TOOLS = frozenset({
@@ -92,6 +95,11 @@ STRUCTURE_WORDS = frozenset({"llm_call", "←", "user_prompt", "respond", "(erro
                              "unknown", "mcp"})
 
 AGENTS = frozenset({"claude-code", "claude-code-subagent", "codex"})
+# Claude Code's built-in subagent types. A subagent is the agent
+# ``claude-code-subagent:<type>``; any other type is a pseudonym.
+SUBAGENT_PREFIX = "claude-code-subagent:"
+SUBAGENT_TYPES = frozenset({"general-purpose", "Explore", "Plan", "statusline-setup", "claude-code-guide",
+                            "output-style-setup"})
 # Workflow prefixes: ``<source>/<pseudonym or kept name>``.
 SOURCES = frozenset({"claude-code", "codex"})
 EVENT_TYPES = frozenset({"decision", "tool_call"})
