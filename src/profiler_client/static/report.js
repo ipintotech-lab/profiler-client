@@ -50,21 +50,27 @@ const findingNodes = o => o.type === 'EXTRACT_DETERMINISTIC_SUBSTEP'
   ? [...(o.nodes || []), ...(o.nodes || []).slice(0, -1).map(n => LLM_AFTER + n)] : (o.nodes || []);
 // a finding's row in the steps table: the step it's listed under
 const rowOf = o => (o.nodes || [o.title])[0];
+// a map box's step: its id, or for a step more than one agent uses, the `step` its per-agent box names
+const stepOf = n => n.step ?? n.id;
 function marksOf(data, byId) {
   const marks = new Map();
-  const add = (id, kind, o) => {
-    if (!byId.has(id)) return;
-    const m = marks.get(id) || { kinds: new Set(), rows: new Set([id]) };
-    m.kinds.add(kind);
-    m.rows.add(rowOf(o));
-    marks.set(id, m);
+  const boxes = new Map();  // step -> its boxes, one per agent that uses it
+  for (const n of byId.values()) boxes.set(stepOf(n), [...(boxes.get(stepOf(n)) || []), n]);
+  const add = (step, kind, o, only) => {
+    for (const n of boxes.get(step) || []) {
+      if (only && n.kind !== only || o.identity?.agent && n.step && n.agent !== o.identity.agent) continue;
+      const m = marks.get(n.id) || { kinds: new Set(), rows: new Set([step]) };
+      m.kinds.add(kind);
+      m.rows.add(rowOf(o));
+      marks.set(n.id, m);
+    }
   };
   for (const o of [...(data.summary?.opportunities || []), ...(data.summary?.next_steps || [])]) {
     const nodes = o.nodes || [];
     if (o.type === 'REVIEW_HIDDEN_STATE') nodes.forEach(id => add(id, 'unstable', o));
-    else if (o.type === 'CACHE_RESULT') nodes.filter(id => byId.get(id)?.kind === 'step').forEach(id => add(id, 'repeats', o));
+    else if (o.type === 'CACHE_RESULT') nodes.forEach(id => add(id, 'repeats', o, 'step'));
     else if (o.type === 'EXTRACT_DETERMINISTIC_SUBSTEP') nodes.slice(0, -1).forEach(id => add(LLM_AFTER + id, 'replace', o));
-    else nodes.filter(id => byId.get(id)?.kind === 'llm_call').forEach(id => add(id, 'replace', o));  // a rule, or a rule for one slice
+    else nodes.forEach(id => add(id, 'replace', o, 'llm_call'));  // a rule, or a rule for one slice
   }
   return marks;
 }
@@ -107,6 +113,10 @@ const MAP_LINKS = 14;
 const MAP_MIN_SCALE = 0.8;  // a map never shrinks below this to fit its box: a wider one scrolls sideways inside it
 const MAP_END = { '@prompt': 'Prompt', '@reply': 'Reply' };
 const plainName = n => String(n).replace(HASH, 'h:$1');
+const runPct = x => `${Math.round(100 * x)}%`;
+// a handoff's label: started together with another agent ("both"), one way of several ("either"), or back to an earlier agent
+const handoffTag = e => e.loop ? `return · ${runPct(e.loop.share_of_runs)} of runs, ${e.loop.passes} passes`
+  : e.fork ? `${e.fork.mode} · ${runPct(e.fork.share_of_runs)} of runs` : '';
 function renderMap(q, data, all = false) {
   const avail = data.availability?.graph, graph = data.graph;
   if (!avail?.available || !graph) {
@@ -131,6 +141,13 @@ function renderMap(q, data, all = false) {
     : id === '@reply' ? bandOf(graph.edges.find(e => e.to === '@reply')?.from)
     : Math.max(0, agents.indexOf(byId.get(id)?.agent));
   const handoff = e => bandOf(e.from) !== bandOf(e.to);
+  // agents one call starts together ("both": they run side by side) share a row of bands
+  const groups = [];
+  for (let b = 0; b < (banded ? agents.length : 1); b++) {
+    const fork = graph.edges.find(e => e.fork?.mode === 'both' && bandOf(e.to) === b)?.from;
+    const with_ = fork !== undefined && groups.find(g => g.fork === fork);
+    if (with_) with_.bands.push(b); else groups.push({ fork, bands: [b] });
+  }
   // the most-taken links (the server lists them most-taken first) and the steps they join;
   // in bands, every handoff and the most-taken links inside each band; `all` draws every link
   const inBand = new Map();
@@ -145,16 +162,16 @@ function renderMap(q, data, all = false) {
 
   // names: a pseudonymous step is "Tool A", "Tool B"… (most-called first); an LLM call is "after" what it read
   const letters = new Map();
-  for (const n of shown) if (n.kind === 'step' && HAS_HASH.test(n.id)) letters.set(n.id, `Tool ${String.fromCharCode(65 + letters.size % 26)}${letters.size >= 26 ? Math.floor(letters.size / 26) : ''}`);
+  for (const n of shown) if (n.kind === 'step' && HAS_HASH.test(stepOf(n)) && !letters.has(stepOf(n))) letters.set(stepOf(n), `Tool ${String.fromCharCode(65 + letters.size % 26)}${letters.size >= 26 ? Math.floor(letters.size / 26) : ''}`);
   const fit = (t, k) => t.length > k ? `${t.slice(0, k - 1)}…` : t;
-  const label = id => MAP_END[id] ? MAP_END[id].toLowerCase() : letters.get(id) || plainName(id);
+  const label = id => { const step = byId.has(id) ? stepOf(byId.get(id)) : id; return MAP_END[id] ? MAP_END[id].toLowerCase() : letters.get(step) || plainName(step); };
   const lines = n => {
     if (n.kind === 'llm_call') {
-      const after = String(n.id).replace(/^llm_call ← /, '');
+      const after = String(stepOf(n)).replace(/^llm_call ← /, '');
       return ['LLM call', `after ${fit(after === 'user_prompt' ? 'prompt' : label(after), 15)}`, `${count(n.occurrences)} · ${money(n.cost)}`];
     }
-    return letters.has(n.id) ? [letters.get(n.id), fit(plainName(n.id), 20), plural(n.occurrences, 'call')]
-      : [fit(plainName(n.id), 18), '', plural(n.occurrences, 'call')];
+    return letters.has(stepOf(n)) ? [letters.get(stepOf(n)), fit(plainName(stepOf(n)), 20), plural(n.occurrences, 'call')]
+      : [fit(plainName(stepOf(n)), 18), '', plural(n.occurrences, 'call')];
   };
 
   // places: walk out from the prompt along the busiest links; a step sits right of what started it,
@@ -179,14 +196,24 @@ function renderMap(q, data, all = false) {
     return at;
   };
   const at = new Map(), bands = [];
-  for (let b = 0, row = 0; b < (banded ? agents.length : 1); b++) {
-    const ids = new Set([...joined].filter(id => bandOf(id) === b));
-    if (!ids.size) continue;
-    const local = place(ids, links.filter(e => !handoff(e) && ids.has(e.from)));
-    const rows = Math.max(...[...local.values()].map(p => p.r)) + 1;
-    for (const [id, p] of local) at.set(id, { c: p.c, r: p.r + row, b: bands.length });
-    bands.push({ agent: agents[b], r0: row, r1: row + rows - 1 });
+  let row = 0, level = 0;  // level: a row of bands, one band or a side-by-side group
+  for (const group of groups) {
+    const mine = [];
+    let col = 0;
+    for (const b of group.bands) {
+      const ids = new Set([...joined].filter(id => bandOf(id) === b));
+      if (!ids.size) continue;
+      const local = place(ids, links.filter(e => !handoff(e) && ids.has(e.from)));
+      for (const [id, p] of local) at.set(id, { c: p.c + col, r: p.r + row, b: level });
+      const cols = Math.max(...[...local.values()].map(p => p.c)) + 1;
+      mine.push({ agent: agents[b], level, r0: row, rows: Math.max(...[...local.values()].map(p => p.r)) + 1, c0: col, c1: col + cols - 1 });
+      col += cols;
+    }
+    if (!mine.length) continue;
+    const rows = Math.max(...mine.map(m => m.rows));
+    for (const m of mine) bands.push({ ...m, r1: row + rows - 1, alone: mine.length === 1 });
     row += rows;
+    level++;
   }
 
   const W = 172, H = 68, PW = 96, PH = 44, CX = 236, RY = 200, PAD = 16, TOP = 40, HEAD = banded ? 36 : 0;
@@ -197,12 +224,13 @@ function renderMap(q, data, all = false) {
     return { x, y, w, h, cx: x + w / 2, cy: y + h / 2 };
   };
   const cols = Math.max(...[...at.values()].map(p => p.c)) + 1, rows = Math.max(...[...at.values()].map(p => p.r)) + 1;
-  const width = PAD * 2 + (cols - 1) * CX + W, height = rowY(rows - 1, bands.length - 1) + H + 56;
+  const width = PAD * 2 + (cols - 1) * CX + W, height = rowY(rows - 1, level - 1) + H + 56;
   const bandRects = banded ? bands.map((band, b) => {
-    const y = rowY(band.r0, b) - 48, h = rowY(band.r1, b) + H + 18 - y;
-    return `<g class="band"><rect x="${PAD / 2}" y="${y}" width="${width - PAD}" height="${h}" rx="8"/>` +
+    const y = rowY(band.r0, band.level) - 48, h = rowY(band.r1, band.level) + H + 18 - y;
+    const x = band.alone ? PAD / 2 : PAD / 2 + band.c0 * CX, w = band.alone ? width - PAD : (band.c1 - band.c0) * CX + W + PAD;
+    return `<g class="band"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8"/>` +
       // top right: runs enter a band in its first column, so the handoff arrows come in on the left
-      `<text x="${width - PAD}" y="${y + 22}" text-anchor="end"><tspan class="k">Agent ${b + 1} of ${bands.length}</tspan> ${esc(plainName(band.agent))}` +
+      `<text x="${x + w - PAD / 2}" y="${y + 22}" text-anchor="end"><tspan class="k">Agent ${b + 1} of ${bands.length}</tspan> ${esc(plainName(band.agent))}` +
       `${HAS_HASH.test(band.agent) ? `<title>${esc(band.agent)}</title>` : ''}</text></g>`;
   }) : [];
 
@@ -223,10 +251,10 @@ function renderMap(q, data, all = false) {
     const isHot = hot && e.to === hot.id && e.kind === 'reads_result';
     if (handoff(e)) {  // to the next agent's band: out of the bottom, into the top, labelled with the runs that took it
       const down = b.y > a.y, x1 = a.cx, y1 = down ? a.y + a.h : a.y, x2 = b.cx, y2 = down ? b.y - 2 : b.y + b.h + 2, mid = (y1 + y2) / 2;
-      const from = agents[bandOf(e.from)], to = agents[bandOf(e.to)];
-      return `<path class="edge handoff" d="M${x1},${y1} C${x1},${mid} ${x2},${mid} ${x2},${y2}" stroke-width="${w.toFixed(1)}" marker-end="url(#mapArrow)">` +
-        `<title>${esc(plainName(from))} hands over to ${esc(plainName(to))}: ${esc(label(e.from))} → ${esc(label(e.to))} in ${esc(plural(e.distinct_run_count, 'run'))}</title></path>` +
-        `<text class="edge-n" x="${(x1 + x2) / 2 + 8}" y="${mid + 4}">${esc(plural(e.distinct_run_count, 'run'))}</text>`;
+      const from = agents[bandOf(e.from)], to = agents[bandOf(e.to)], tag = handoffTag(e);
+      return `<path class="edge handoff${e.loop ? ' return' : ''}" d="M${x1},${y1} C${x1},${mid} ${x2},${mid} ${x2},${y2}" stroke-width="${w.toFixed(1)}" marker-end="url(#mapArrow)">` +
+        `<title>${esc(plainName(from))} ${e.loop ? 'hands back' : 'hands over'} to ${esc(plainName(to))}: ${esc(label(e.from))} → ${esc(label(e.to))} in ${esc(plural(e.distinct_run_count, 'run'))}${tag ? `; ${esc(tag)}` : ''}</title></path>` +
+        `<text class="edge-n" x="${(x1 + x2) / 2 + 8}" y="${mid + 4}">${esc(tag || plural(e.distinct_run_count, 'run'))}</text>`;
     }
     let d, lx, ly, anchor = 'middle';
     if (ca === cb) {  // same column: down on the left, up on the right
@@ -261,7 +289,7 @@ function renderMap(q, data, all = false) {
       bx += w + 6;
       return `<g class="badge ${k}"><rect x="${x}" y="${b.y - 10}" width="${w}" height="20" rx="10"/><text x="${x + w / 2}" y="${b.y + 4}" text-anchor="middle">${esc(MARK[k].badge)}</text></g>`;
     });
-    return `<g class="${cls}" data-node="${esc(n.id)}"${kinds.length ? ` data-marks="${kinds.map(k => MARK[k].badge).join(', ')}"` : ''}><title>${esc(n.id)}</title><rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="6"/>` +
+    return `<g class="${cls}" data-node="${esc(n.id)}" data-step="${esc(stepOf(n))}"${kinds.length ? ` data-marks="${kinds.map(k => MARK[k].badge).join(', ')}"` : ''}><title>${esc(n.step ? `${n.step} (${n.agent})` : n.id)}</title><rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="6"/>` +
       `<text class="t" x="${b.x + 14}" y="${b.y + 26}">${esc(t)}</text>` +
       (s1 ? `<text class="s" x="${b.x + 14}" y="${b.y + 44}">${esc(s1)}</text>` : '') +
       `<text class="s" x="${b.x + 14}" y="${b.y + (s1 ? 59 : 50)}">${esc(s2)}${loop ? ` · ↻ ${esc(count(loop))}` : ''}</text>${badges.join('')}</g>`;
@@ -279,16 +307,21 @@ function renderMap(q, data, all = false) {
     '<p class="legend kinds"><span><i class="sw llm"></i>LLM call (has a cost)</span><span><i class="sw tool"></i>Tool call</span>' +
     (hot && total ? `<span><i class="sw hot"></i>Largest share of spend (${Math.round(100 * hot.cost / total)}%)</span>` : '') + '</p>';
 
-  const name = id => MAP_END[id] || (byId.get(id)?.kind === 'llm_call' ? lines(byId.get(id)).slice(0, 2).join(' ') : label(id));
+  const name = id => {
+    const n = byId.get(id), base = MAP_END[id] || (n?.kind === 'llm_call' ? lines(n).slice(0, 2).join(' ') : label(id));
+    return n?.step ? `${base} (${plainName(n.agent)})` : base;  // one box per agent: say whose
+  };
   const way = (n, e) => {
-    const read = String(n.id).replace(/^llm_call ← /, '');
+    const read = String(stepOf(n)).replace(/^llm_call ← /, '');
     const what = e.to === '@reply' ? 'replies' : e.to === n.id ? 'repeats itself'
-      : byId.get(e.to)?.kind === 'llm_call' ? `goes on to the ${name(e.to)}` : `calls ${label(e.to)}${e.to === read ? ' again' : ''}`;
+      : byId.get(e.to)?.kind === 'llm_call' ? `goes on to the ${name(e.to)}` : `calls ${name(e.to)}${stepOf(byId.get(e.to) || { id: e.to }) === read ? ' again' : ''}`;
     return `${what} ${plural(e.transition_count, 'time')} (${share(e)})`;
   };
   const branches = shown.filter(n => (out.get(n.id) || []).length > 1)
     .map(n => `${name(n.id)} goes ${out.get(n.id).length} ways: it ${out.get(n.id).map(e => way(n, e)).join(', ')}. `).join('');
-  const handoffs = banded ? `Each band is one agent, in the order runs reach them; a link from one band to the next is a handoff, labelled with how many runs took it. ` : '';
+  const handoffs = banded ? `Each band is one agent, in the order runs reach them; a link from one band to the next is a handoff, labelled with how many runs took it. ` +
+    (graph.edges.some(e => e.fork) ? 'Where one step hands over to more than one agent, "both" means it starts them together and they run side by side (their bands sit next to each other); "either" means each run takes one of the ways; the % is the share of runs reaching that step that take the link. ' : '') +
+    (graph.edges.some(e => e.loop) ? 'A return link goes back to an agent that already ran in that run: it gives the share of runs that take it and the average number of passes in those runs. ' : '') : '';
   q('mapWhy').textContent = handoffs + branches +
     `Arrow width is how many times a hop happened across ${plural(graph.run_count, 'run')}; where a step goes more than one way, the % is that way's share. Links come from the trace: an LLM call choosing a tool, the tool whose result the next LLM call read, the prompt that started a run, and the LLM call that replied. Where a trace doesn't record which LLM call chose a tool or read its result (OpenTelemetry traces often don't), the link is taken from the order the calls ran in within one run.`;
   return marks;
@@ -430,7 +463,7 @@ function wireEvents(q, data, reportPath) {
   const panel = q('events');
   const show = g => {
     const id = g.dataset.node, ids = [...examples.get(id)];
-    panel.innerHTML = `<p><b>${stepName(id)}</b>: ${plural(ids.length, 'example call')}. On this machine, each command prints the call's original record from your trace file.</p>` +
+    panel.innerHTML = `<p><b>${stepName(g.dataset.step)}</b>: ${plural(ids.length, 'example call')}. On this machine, each command prints the call's original record from your trace file.</p>` +
       `<ul>${ids.map(x => `<li><code>profiler-client show-event ${esc(shellQuote(reportPath))} ${esc(x)}</code> <button type="button" class="link" data-copy>Copy</button></li>`).join('')}</ul>`;
     panel.hidden = false;
   };
@@ -439,7 +472,7 @@ function wireEvents(q, data, reportPath) {
     g.classList.add('pick');
     g.setAttribute('tabindex', '0');
     g.setAttribute('role', 'button');
-    g.setAttribute('aria-label', `Example calls of ${g.dataset.node}`);
+    g.setAttribute('aria-label', `Example calls of ${g.dataset.step}`);
     g.addEventListener('click', () => show(g));
     g.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); show(g); } });
   }
@@ -510,7 +543,7 @@ function renderFirst(q, data, onMap) {
 }
 
 // select steps on the map as it is drawn now
-const pickOnMap = (q, ids) => q('map').querySelectorAll('g[data-node]').forEach(g => g.classList.toggle('sel', ids.has(g.dataset.node)));
+const pickOnMap = (q, ids) => q('map').querySelectorAll('g[data-node]').forEach(g => g.classList.toggle('sel', ids.has(g.dataset.node) || ids.has(g.dataset.step)));
 
 // a marked map step shows its rows in the table
 function wireMarks(q, data, marks) {
@@ -533,7 +566,7 @@ function wireMarks(q, data, marks) {
     g.classList.add('pick');
     g.setAttribute('tabindex', '0');
     g.setAttribute('role', 'button');
-    g.setAttribute('aria-label', `${id}, ${g.dataset.marks}: show its rows in the table${events ? ' and example calls' : ''}`);
+    g.setAttribute('aria-label', `${g.dataset.step}, ${g.dataset.marks}: show its rows in the table${events ? ' and example calls' : ''}`);
     g.addEventListener('click', () => showRows(id));
     g.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showRows(id); } });
   }
