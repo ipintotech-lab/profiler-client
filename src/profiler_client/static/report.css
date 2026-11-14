@@ -184,9 +184,18 @@
   .sheet .tbl tr.more { display: none; }
 }
 /* the agent map: one box per agent and per routing decision, a details panel beside it */
-.sheet .amunder { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; margin-top: 16px; }
-.sheet .amunder .hotspots { flex: 1 1 280px; }
-.sheet .ampanel { flex: 2 1 400px; box-sizing: border-box; padding: 14px 16px; background: var(--paper); border-left: 4px solid var(--carbon); border-radius: 0 6px 6px 0; font-size: 14px; }
+/* the agent map with its details panel beside it, the legend and hot spots under the map; on a narrow
+   screen the hot spots come first, then the map, its legend and the panel */
+.sheet .agentmap { display: grid; grid-template-columns: minmax(0, 1fr) 272px; grid-template-areas: "map panel" "legend panel" "hot panel"; gap: 12px 20px; align-items: start; }
+.sheet .agentmap .ammap { grid-area: map; }
+.sheet .agentmap .legend { grid-area: legend; margin-top: 0; }
+.sheet .agentmap .hotspots { grid-area: hot; }
+.sheet .agentmap .hotspots ol { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.sheet .ampanel { grid-area: panel; box-sizing: border-box; max-height: 640px; overflow-y: auto; padding: 14px 16px; background: var(--paper); border-left: 4px solid var(--carbon); border-radius: 0 6px 6px 0; font-size: 14px; }
+@media (max-width: 900px) {
+  .sheet .agentmap { grid-template-columns: minmax(0, 1fr); grid-template-areas: "hot" "map" "legend" "panel"; }
+  .sheet .ampanel { max-height: none; }
+}
 .sheet .ampanel .kind { margin: 0; color: var(--ink-2); font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
 .sheet .ampanel h4 { margin: 4px 0 8px; font-size: 17px; overflow-wrap: anywhere; }
 .sheet .ampanel h5 { margin: 14px 0 6px; font-size: 14px; }
@@ -209,16 +218,17 @@
 .sheet .mapbox .am:hover rect, .sheet .mapbox .am:focus-visible rect { stroke-width: 3; }
 .sheet .mapbox .am:focus { outline: none; }
 .sheet .mapbox .am.sel rect { stroke: var(--ink); stroke-width: 3.5; }
-.sheet .mapbox .am .t { fill: var(--ink); font-size: 14px; font-weight: 600; }
+.sheet .mapbox .am .t { fill: var(--ink); font-size: 13px; font-weight: 600; }
 .sheet .mapbox .am .f { fill: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; }
 .sheet .mapbox .am .s, .sheet .mapbox .am .c { fill: var(--ink); font-size: 12px; font-family: var(--mono); }
 .sheet .mapbox .am.f0 .s, .sheet .mapbox .am.router .s { fill: var(--ink-2); }
-.sheet .mapbox .am .w { fill: var(--bad); font-size: 12px; font-weight: 600; }
-.sheet .mapbox .am circle.no { fill: var(--ink); }
+.sheet .mapbox .am .w { fill: var(--ink); font-size: 12px; font-weight: 600; }
+.sheet .mapbox .am .w .bad { fill: #7a161c; } /* a deeper red: 4.9:1 on the darkest fill */
+.sheet .mapbox .am circle.no { fill: var(--ink); stroke: var(--sheet); stroke-width: 2; }
 .sheet .mapbox .am text.no { fill: var(--sheet); font-size: 13px; font-weight: 700; }
 .sheet .mapbox .together rect { fill: none; stroke: var(--ink-2); stroke-dasharray: 3 3; }
 .sheet .mapbox .together text { fill: var(--ink-2); font-size: 12px; }
-.sheet .mapbox .edge.reads { stroke-dasharray: 2 3; }
+.sheet .agentmap .edge { stroke-width: 1.75; }
 .sheet .mapbox .edge.return { stroke-dasharray: 7 5; }
 .sheet .mapbox .sw.f0 { background: var(--sheet); border-color: var(--carbon); margin-right: 2px; }
 .sheet .mapbox .sw.f1 { background: #e3e4f6; border-color: var(--carbon); margin-right: 2px; }
