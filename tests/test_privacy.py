@@ -468,6 +468,33 @@ def test_open_keeps_a_per_agent_box_and_how_agents_hand_over(tmp_path, monkeypat
     rendered = output.read_text()
     assert "get_balance @ fraud-screening" in rendered and step_token not in rendered and agent_token not in rendered
 
+def test_open_keeps_which_agents_repeat_a_call_between_them_and_nothing_of_the_call(tmp_path, monkeypatch):
+    # "Between agents" names the agents (restored on this machine) and counts calls and time; never an input
+    payload_hash, agent_token, value_token = "e" * 64, "h:" + "9" * 64, "h:" + "4" * 64
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    names = {agent_token: "fraud-screening", value_token: "private-input"}
+    write_name_list(payload_hash, names, tmp_path / "profiler-client" / "names")
+    duplicate = {"type": "CROSS_AGENT_DUPLICATE", "title": "get_history", "nodes": ["get_history"],
+                 "agents": ["credit", agent_token], "observations": 12, "repeated_calls": 12,
+                 "repeated_latency_ms": 2400.0, "saving": None, "action": "Fetch once",
+                 "evidence_sample": [{"input": {"customer": value_token}}], "side_effects": {"blocks_cache": False}}
+    cache = {"type": "CACHE_RESULT", "title": "get_rates", "nodes": ["get_rates"], "observations": 30, "saving": 1.0,
+             "between_agents": {"agents": ["credit", agent_token], "runs": 12, "extra": value_token}}
+    source = tmp_path / "report.json"
+    source.write_text(json.dumps({"payload_sha256": payload_hash,
+                                  "summary": {"totals": {"cost": 4}, "opportunities": [duplicate, cache]}}))
+    page = view(translate(json.loads(source.read_text()), names, set(), set()))["summary"]["opportunities"]
+    assert page[0]["agents"] == ["credit", "fraud-screening"]
+    assert (page[0]["repeated_calls"], page[0]["repeated_latency_ms"]) == (12, 2400.0)
+    assert "evidence_sample" not in page[0] and "side_effects" not in page[0]
+    assert page[1]["between_agents"] == {"agents": ["credit", "fraud-screening"], "runs": 12}
+    output = tmp_path / "report.html"
+    assert cli.main(["open", str(source), "-o", str(output)]) == 0
+    rendered = output.read_text()
+    assert "fraud-screening" in rendered and agent_token not in rendered
+    assert "private-input" not in rendered and value_token not in rendered
+
+
 def test_open_keeps_the_headline_and_next_steps_but_no_input_slice(tmp_path, monkeypatch):
     # "do these first" names steps (restored on this machine); a region's slice is an input value, never written
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))

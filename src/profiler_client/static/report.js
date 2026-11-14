@@ -21,6 +21,7 @@ const KIND = {
   EXTRACT_DETERMINISTIC_SUBSTEP: 'Same steps in the same order',
   CONDITIONAL_LLM_BYPASS: 'An LLM choice that never changes',
   REVIEW_HIDDEN_STATE: 'Same request, different results',
+  CROSS_AGENT_DUPLICATE: 'Same call by more than one agent in a run',
 };
 // "Do these first": a finding's plain title, and what the next step is called
 const TITLE = {
@@ -29,6 +30,7 @@ const TITLE = {
   EXTRACT_DETERMINISTIC_SUBSTEP: 'Script a fixed sequence',
   DETERMINISTIC_REGION: 'Skip the LLM for one slice of inputs',
   REVIEW_HIDDEN_STATE: 'Unstable result: find the cause',
+  CROSS_AGENT_DUPLICATE: 'Fetch once, share between agents',
 };
 const STEP = { replay: 'Replay', review: 'Review', declare: 'Declare', investigate: 'Investigate' };
 const EVIDENCE = {
@@ -37,13 +39,17 @@ const EVIDENCE = {
   EXTRACT_DETERMINISTIC_SUBSTEP: n => `These steps ran in this order ${plural(n, 'time')}.`,
   DETERMINISTIC_REGION: n => `${plural(n, 'call')} fall in this slice of inputs.`,
   REVIEW_HIDDEN_STATE: n => `Across ${plural(n, 'call')}, the same request gave different results.`,
+  CROSS_AGENT_DUPLICATE: n => `In ${plural(n, 'run')}, more than one agent made this call with the same input and got the same result.`,
 };
 // what the map marks on a step a finding is about: each has its own words, never colour alone
 const MARK = {
   unstable: { badge: 'unstable result', legend: 'the same request gave different results' },
   replace: { badge: 'rule or script', legend: 'LLM call a rule or script could replace' },
   repeats: { badge: 'repeats', legend: 'tool call that repeats with the same input and result' },
+  shared: { badge: 'shared', legend: 'tool call more than one agent makes in a run, with the same input and result' },
 };
+// the agents a finding says repeat a call between them within a run
+const sharedBy = o => o.type === 'CROSS_AGENT_DUPLICATE' ? o.agents || [] : o.between_agents?.agents || [];
 const LLM_AFTER = 'llm_call ← ';
 // the map steps a finding is about; scripting a sequence removes the LLM calls that chose its next steps
 const findingNodes = o => o.type === 'EXTRACT_DETERMINISTIC_SUBSTEP'
@@ -69,8 +75,19 @@ function marksOf(data, byId) {
     const nodes = o.nodes || [];
     if (o.type === 'REVIEW_HIDDEN_STATE') nodes.forEach(id => add(id, 'unstable', o));
     else if (o.type === 'CACHE_RESULT') nodes.forEach(id => add(id, 'repeats', o, 'step'));
+    else if (o.type === 'CROSS_AGENT_DUPLICATE') { /* marked below, on every agent's copy */ }
     else if (o.type === 'EXTRACT_DETERMINISTIC_SUBSTEP') nodes.slice(0, -1).forEach(id => add(LLM_AFTER + id, 'replace', o));
     else nodes.forEach(id => add(id, 'replace', o, 'llm_call'));  // a rule, or a rule for one slice
+    const agents = sharedBy(o);
+    for (const step of agents.length ? nodes : []) {
+      const copies = (boxes.get(step) || []).filter(n => n.kind === 'step' && (!n.step || agents.includes(n.agent)));
+      for (const n of copies) {
+        const m = marks.get(n.id) || { kinds: new Set(), rows: new Set([step]) };
+        m.kinds.add('shared');
+        m.peers = new Set([...(m.peers || []), ...copies.map(c => c.id)]);
+        marks.set(n.id, m);
+      }
+    }
   }
   return marks;
 }
@@ -434,6 +451,11 @@ const SHEET = HEAD + `
     <h3>Do these first</h3>
     <div data-r="first"></div>
   </section>
+  <section class="between" data-r="betweenSection" hidden>
+    <h3>Between agents</h3>
+    <p class="why">Calls more than one agent makes in the same run, with the same input and the same result. One fetch could serve them all.</p>
+    <div data-r="between"></div>
+  </section>
   <section>
     <h3>Where the money went</h3>
     <p class="keys" aria-hidden="true"><span class="key"><b></b>Spend</span><span class="key"><b class="rep"></b>Spent on repeats</span></p>
@@ -542,6 +564,28 @@ function renderFirst(q, data, onMap) {
   </li>`).join('')}</ol>`;
 }
 
+// "Between agents": each finding a call more than one agent repeats within a run, naming the agents
+function renderBetween(q, data) {
+  const found = (data.summary?.opportunities || []).filter(o => sharedBy(o).length > 1);
+  const seen = new Set(), rows = found.filter(o => {  // one card per step: a cache finding per agent shares its note
+    const key = `${o.type} ${rowOf(o)}`;
+    return !seen.has(key) && seen.add(key);
+  });
+  q('betweenSection').hidden = !rows.length;
+  q('between').innerHTML = rows.length ? `<ol>${rows.map(o => {
+    const agents = sharedBy(o), runs = o.type === 'CROSS_AGENT_DUPLICATE' ? o.observations : o.between_agents.runs;
+    const time = o.repeated_latency_ms ? `, ${(o.repeated_latency_ms / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })} s` : '';
+    return `<li class="card">
+    <p class="top"><span class="stepl">${esc(TITLE[o.type] || o.type)}</span><span class="cost">${o.saving ? `${money(o.saving)} <span class="k">in this dataset</span>` : 'No dollar cost recorded'}</span></p>
+    <h4>${stepName(rowOf(o))}</h4>
+    <p class="where">${agents.map(stepName).join(' · ')}</p>
+    <p>${esc(`The same call by ${plural(agents.length, 'agent')} in ${plural(runs, 'run')}`)}${o.type === 'CROSS_AGENT_DUPLICATE'
+      ? esc(`: ${plural(o.repeated_calls, 'repeated call')}${time}.`) : esc('. Its result also repeats across runs, so reusing it covers these calls too.')}</p>
+    <p class="do">${shortHashes(o.action || '')}.</p>
+  </li>`;
+  }).join('')}</ol>` : '';
+}
+
 // select steps on the map as it is drawn now
 const pickOnMap = (q, ids) => q('map').querySelectorAll('g[data-node]').forEach(g => g.classList.toggle('sel', ids.has(g.dataset.node) || ids.has(g.dataset.step)));
 
@@ -558,7 +602,7 @@ function wireMarks(q, data, marks) {
     }
     q('steps').querySelectorAll('tr.hl').forEach(tr => tr.classList.remove('hl'));
     found.forEach(tr => tr.classList.add('hl'));
-    pickOnMap(q, new Set([id]));
+    pickOnMap(q, new Set([id, ...(marks.get(id).peers || [])]));
     found[0]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   };
   for (const g of groups.filter(g => marks.has(g.dataset.node))) {
@@ -592,6 +636,7 @@ function renderReport(root, data, { name = '', meta = [], showEvent = null } = {
     renderFirst(q, data, new Set([...q('map').querySelectorAll('g[data-node]')].map(g => g.dataset.node)));
   };
   renderLead(q, data);
+  renderBetween(q, data);
   q('map').addEventListener('click', e => {
     const b = e.target.closest('button[data-map]');
     if (!b) return;
@@ -663,12 +708,13 @@ function renderOverviewLead(q, o) {
   }
 }
 
-function renderOverviewRows(q, o) {
+function renderOverviewRows(q, o, reports) {
   const rows = o.workflows || [], labels = o.risk_labels || {};
+  const agents = r => Object.keys(reports?.[r.name]?.mine?.by_agent || {}).length;
   const max = Math.max(0, ...rows.map(r => r.spend || 0));
   const w = v => max ? 100 * (v || 0) / max : 0;
   q('workflows').querySelector('tbody').innerHTML = rows.map(r => `<tr>
-      <td><button class="link open-wf" type="button" data-wf="${esc(r.name)}">${stepName(r.name)}</button><span class="note">${plural(r.runs, 'run')}</span></td>
+      <td><button class="link open-wf" type="button" data-wf="${esc(r.name)}">${stepName(r.name)}</button><span class="note">${plural(r.runs, 'run')}${agents(r) > 1 ? ` · ${plural(agents(r), 'agent')}` : ''}</span></td>
       <td class="barcell"><div class="spendbar"><i style="width:${w(r.spend)}%"></i><i class="rep" style="width:${w(r.replaceable)}%"></i></div></td>
       <td class="num" data-label="Spend">${money(r.spend)}</td>
       <td class="num" data-label="Could be replaced">${money(r.replaceable)}<span class="note">${r.spend ? pct(r.replaceable || 0, r.spend) : ''}</span></td>
@@ -694,7 +740,7 @@ function renderOverview(root, data, { name = '', meta = [], showEvent = null, wo
     renderOverviewLead(q, o);
     const runs = (o.workflows || []).reduce((n, r) => n + (r.runs || 0), 0);
     q('totals').innerHTML = `${money(o.totals?.spend)} <span class="k">across</span> ${plural(runs, 'run')} <span class="k">in</span> ${plural((o.workflows || []).length, 'workflow')}.`;
-    renderOverviewRows(q, o);
+    renderOverviewRows(q, o, data.reports);
     q('workflows').addEventListener('click', e => {
       const b = e.target.closest('button[data-wf]');
       if (b) show(b.dataset.wf);
