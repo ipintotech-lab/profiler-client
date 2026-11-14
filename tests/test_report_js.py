@@ -133,3 +133,12 @@ def test_a_long_step_name_wraps_on_the_map_and_is_never_cut():
     assert "…" not in page
     # the second line is in the title's type; what still overflows is squeezed to the box
     assert re.search(r'<text class="t"[^>]*>approve_</text><text class="t"[^>]*textLength[^>]*>transaction_after_review</text>', page)
+
+
+def test_a_step_or_agent_with_no_recorded_cost_shows_a_dash_not_zero_dollars():
+    report = _report()
+    report["mine"]["by_agent"]["kyc"] = {"actions": [{"node": "kyc_lookup", "total_cost": 0, "occurrences": 4}]}
+    page = _render(report)
+    assert "$0<" not in page["steps"] and "$0," not in page["steps"]
+    assert "kyc</span> <span class=\"k\">no cost recorded" in page["steps"]
+    assert "$0" not in page["amPrint"] and "$0" not in page["amPanel"]

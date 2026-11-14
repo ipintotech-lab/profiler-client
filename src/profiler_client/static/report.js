@@ -12,6 +12,8 @@
 'use strict';
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = v => v == null ? '—' : v === 0 ? '$0' : `$${v.toFixed(v < 1 ? 3 : 2)}`;
+// a step's or an agent's cost: a trace gives tool calls no cost, so none recorded is a dash, not $0
+const spend = v => v ? money(v) : '—';
 const count = n => Number(n || 0).toLocaleString();
 const plural = (n, word) => `${count(n)} ${word}${n === 1 ? '' : 's'}`;
 // every percent on the page: part of whole, rounded, with anything above 0 and under 1% as "<1%"
@@ -374,7 +376,7 @@ function renderSteps(q, data, showAllSteps) {
     const cache = s.finds.filter(o => o.type === 'CACHE_RESULT'), lines = [];
     if (cache.length) {
       const calls = cache.reduce((n, o) => n + o.observations, 0);
-      lines.push(`${count(calls - cache.length)} of ${plural(calls, 'call')}, ${money(s.repeat)}` +
+      lines.push(`${count(calls - cache.length)} of ${plural(calls, 'call')}${s.repeat ? `, ${money(s.repeat)}` : ''}` +
         (cache.length > 1 ? `<span class="note">across ${count(cache.length)} different inputs</span>` : ''));
     }
     for (const type of Object.keys(KIND).filter(k => k !== 'CACHE_RESULT')) {
@@ -423,7 +425,7 @@ function renderSteps(q, data, showAllSteps) {
     return `<tr class="${acts.length ? 'has-try' : ''}" data-node="${esc(s.node)}">
       <td data-label="Step">${stepName(s.node)}<span class="note">${plural(s.occurrences, 'call')}</span></td>
       <td class="barcell"><div class="spendbar"><i style="width:${max ? 100 * (s.total_cost || 0) / max : 0}%"></i><i class="rep" style="width:${max ? 100 * s.repeat / max : 0}%"></i></div></td>
-      <td class="num" data-label="Cost">${money(s.total_cost)}<span class="note">${share(s.total_cost || 0, cost)}</span></td>
+      <td class="num" data-label="Cost">${s.total_cost ? `${money(s.total_cost)}<span class="note">${share(s.total_cost, cost)}</span>` : '—<span class="note">none recorded</span>'}</td>
       <td data-label="Repeats">${repeats(s)}</td></tr>` +
       (acts.length ? `<tr class="try" data-node="${esc(s.node)}"><td colspan="4">${acts.map(a => `<strong>Try:</strong> ${a}`).join('<br>')}</td></tr>` : '');
   };
@@ -435,7 +437,7 @@ function renderSteps(q, data, showAllSteps) {
   const grouped = agents.length > 1 ? agents.map(a => {
     const mine = steps.filter(s => s.agent === a), rows = mine.filter(s => shown.includes(s)), folded = mine.length - rows.length;
     return `<tr class="agent"><th colspan="4" scope="rowgroup">${stepName(a)}${spent(a) !== null
-      ? ` <span class="k">${money(spent(a))}, ${share(spent(a), cost) || '0%'} of spend</span>` : ''}</th></tr>` + rows.map(row).join('') +
+      ? ` <span class="k">${spent(a) ? `${money(spent(a))}, ${share(spent(a), cost)} of spend` : 'no cost recorded'}</span>` : ''}</th></tr>` + rows.map(row).join('') +
       (folded ? `<tr class="fold"><td colspan="4">${plural(folded, 'more step')} recorded no cost and no repeats.</td></tr>` : '');
   }).join('') : null;
   q('steps').querySelector('tbody').innerHTML = (grouped ?? shown.map(row).join('')) + (steps.length > listed.length ? `<tr class="more"><td colspan="4">${showAllSteps
@@ -501,7 +503,7 @@ const SHEET = HEAD + `
       <thead><tr><th>Step</th><th class="barh"><span class="sr">Share of spend</span></th><th class="num">Cost</th><th>Repeats</th></tr></thead>
       <tbody></tbody>
     </table>
-    <p class="why">Each % is that step's share of the workflow's total spend. <code>llm_call ← X</code> is the model deciding what to do after X. A tool's cost includes the LLM calls that chose it, so those dollars also appear in the <code>llm_call</code> rows: rows overlap, and their % don't add up to 100.</p>
+    <p class="why">Each % is that step's share of the workflow's total spend. <code>llm_call ← X</code> is the model deciding what to do after X. A tool's cost includes the LLM calls that chose it, so those dollars also appear in the <code>llm_call</code> rows: rows overlap, and their % don't add up to 100. A dash: the trace records no cost for that step, as for most tool calls.</p>
     <p class="why">Repeats are calls with the same input and the same result as an earlier call.</p>
   </section>
   <section data-r="gapsSection">
@@ -866,7 +868,7 @@ function agentStepsInto(q, data, m, it, slot, why, all = false) {
   if (!graph.edges.length) {
     const rows = graph.nodes.slice().sort((x, y) => (y.occurrences || 0) - (x.occurrences || 0)).map(n => {
       const words = Object.keys(MARK).filter(k => m.marks.get(n.id)?.kinds?.has(k)).map(k => MARK[k].badge).join(', ');
-      return `<tr><td>${stepName(stepOf(n))}</td><td class="num">${count(n.occurrences)}</td><td class="num">${money(n.cost)}</td><td>${esc(words)}</td></tr>`;
+      return `<tr><td>${stepName(stepOf(n))}</td><td class="num">${count(n.occurrences)}</td><td class="num">${spend(n.cost)}</td><td>${esc(words)}</td></tr>`;
     }).join('');
     q(slot).innerHTML = `<table class="tbl agsteps"><thead><tr><th>Step</th><th class="num">Calls</th><th class="num">Cost</th><th>Marks</th></tr></thead><tbody>${rows}</tbody></table>`;
     q(why).textContent = 'The trace links none of these steps to another, so they are listed, not mapped.';
@@ -885,11 +887,11 @@ function renderAgentPrint(q, data, m) {
     ? it.findings.map(o => TITLE[o.type] || o.type).filter((t, i, a) => a.indexOf(t) === i).join('; ') : 'no finding';
   const name = it => `${esc(it.name)}${it.sub ? ` <span class="h">${esc(it.sub)}</span>` : ''}`;
   const table = m.hot.length ? `<h3>Hot spots</h3><table class="tbl hot"><thead><tr><th class="num">#</th><th>Where</th><th class="num">Share</th><th class="num">Cost</th><th>Finding</th></tr></thead><tbody>` +
-    m.hot.map(it => `<tr><td class="num">${it.hot}</td><td>${name(it)}</td><td class="num">${amPct(it.share)}</td><td class="num">${money(it.cost)}</td><td>${esc(what(it))}</td></tr>`).join('') +
+    m.hot.map(it => `<tr><td class="num">${it.hot}</td><td>${name(it)}</td><td class="num">${amPct(it.share)}</td><td class="num">${spend(it.cost)}</td><td>${esc(what(it))}</td></tr>`).join('') +
     '</tbody></table>' : '';
   const agents = m.ag.agents.map(a => m.items.get(a.id)).filter(it => (it.cost || 0) > 0 || it.findings.length);
   q('amPrint').innerHTML = table + agents.map((it, i) => `<div class="agent"><h3>${name(it)}</h3>` +
-    `<p class="k">${esc(`${amPct(it.share)} of spend, ${money(it.cost)}, ${plural(it.a.steps, 'step')}.`)}</p>` +
+    `<p class="k">${esc(`${it.cost ? `${amPct(it.share)} of spend, ${money(it.cost)}` : 'No cost recorded'}, ${plural(it.a.steps, 'step')}.`)}</p>` +
     `<div class="mapbox" data-r="pm${i}"></div><p class="why" data-r="pw${i}"></p><h4>Findings on its steps</h4>${findsHtml(m, it, labels)}</div>`).join('');
   agents.forEach((it, i) => agentStepsInto(q, data, m, it, `pm${i}`, `pw${i}`));
   q('amPrint').hidden = !(table || agents.length);
@@ -920,7 +922,7 @@ function agentPanel(q, data, m, id, showEvent) {
     const stepsOf = a.step_ids.map(s => m.byId.get(s)).filter(Boolean).sort((x, y) => (y.occurrences || 0) - (x.occurrences || 0));
     const direct = ag.links.filter(x => x.kind === 'direct' && x.from_agent === id);
     html = `<p class="kind">${id === ag.router ? 'Agent that routes the run' : 'Agent'}</p><h4>${esc(it.name)}${it.sub ? ` <span class="h">${esc(it.sub)}</span>` : ''}</h4>` +
-      `<p>${esc(`Runs ${when}${along}. ${plural(a.steps, 'step')}, ${money(it.cost)}, ${amPct(it.share)} of spend.`)}</p>` +
+      `<p>${esc(`Runs ${when}${along}. ${plural(a.steps, 'step')}, ${it.cost ? `${money(it.cost)}, ${amPct(it.share)} of spend` : 'no cost recorded'}.`)}</p>` +
       `<h5>Findings on its steps</h5>${finds}` +
       (direct.length ? `<h5>Hands over without an LLM decision</h5>${routes(direct)}` : '') +
       `<h5>Its steps</h5><ul class="steplist">${stepsOf.map(n => `<li>${stepName(stepOf(n))} <span class="k">${esc(plural(n.occurrences, 'call'))}</span></li>`).join('')}</ul>` +
