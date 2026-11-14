@@ -29,7 +29,7 @@ from pydantic import ValidationError
 
 from . import __version__, policy
 from .chat import convert_chat_trajectories, is_chat_trajectory
-from .claude_code import convert_claude_code_transcript, is_claude_code_transcript
+from .claude_code import Subagents, convert_claude_code_transcript, is_claude_code_transcript
 from .codex import convert_codex_session, is_codex_session
 from .contract import CONTRACT_VERSION, PARENT_RELATIONS, READABLE_CONTRACTS, TraceEvent
 from .events import convert_event_log, is_event_log
@@ -133,14 +133,34 @@ def detect(rows: list) -> str | None:
     return next((name for name, matches, _ in FORMATS if matches(rows)), None)
 
 
-def convert_file(path: Path, names: Names) -> tuple[str, object]:
-    """Read one trace file and convert it to contract events, in memory."""
+def subagents_across(paths: list[Path]) -> Subagents:
+    """What the Claude Code files among ``paths`` say about their subagents
+    (``claude_code.Subagents``): a subagent's file is separate from the
+    parent's, and its type and the tool call that started it are in the
+    parent's. A file that can't be read is left to ``convert_file`` to refuse."""
+    found = Subagents()
+    if len(paths) < 2:
+        return found  # a single file reads its own
+    for path in paths:
+        try:
+            rows = read_records(path)
+        except PrepareError:
+            continue
+        if detect(rows) == "claude-code":
+            found.update(Subagents.read([r for r in rows if isinstance(r, dict)]))
+    return found
+
+
+def convert_file(path: Path, names: Names, subagents: Subagents | None = None) -> tuple[str, object]:
+    """Read one trace file and convert it to contract events, in memory.
+    ``subagents``: see ``subagents_across``."""
     rows = read_records(path)
     source = detect(rows)
     if source is None:
         raise PrepareError("FORMAT_UNSUPPORTED", f"{path} is not a supported trace format: "
                                                  + ", ".join(name for name, _, _ in FORMATS))
-    conversion = {name: convert for name, _, convert in FORMATS}[source](rows, names)
+    convert = {name: convert for name, _, convert in FORMATS}[source]
+    conversion = convert(rows, names, subagents) if source == "claude-code" else convert(rows, names)
     if not conversion.events:
         raise PrepareError("NO_EVENTS", f"{path} ({source}) has no LLM or tool calls to prepare")
     return source, conversion
@@ -154,8 +174,9 @@ def prepare(paths: list[Path], out_dir: Path, names: Names, refs: dict | None = 
     events: list[dict] = []
     sessions = sessions_without_cost = 0
     formats: set[str] = set()
+    subagents = subagents_across(paths)
     for file_index, path in enumerate(paths):
-        source, conversion = convert_file(path, names)  # refuses symlinks and non-files first
+        source, conversion = convert_file(path, names, subagents)  # refuses symlinks and non-files first
         if refs is not None:
             refs.setdefault("files", []).append(describe(path))
         for index, (event, where) in enumerate(zip(conversion.events, conversion.sources)):

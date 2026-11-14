@@ -9,7 +9,8 @@ LLM call that chose it, or its enclosing span.
 
 Two more kinds of edge come from what each LLM call records, not from
 order: its ``trigger`` names the step whose result it read (or
-``user_prompt``, drawn from a "prompt" start node), and with "invokes"
+``user_prompt``, drawn from a "prompt" start node -- unless another agent's
+call handed it that prompt, which the handoff already draws), and with "invokes"
 links an LLM call that started no step ended its run (drawn to a "reply"
 end node). Each edge says its ``kind``: "invokes" (or "linked" for other
 relations), "reads_result", "starts" or "ends".
@@ -121,7 +122,10 @@ def build_graph(events: list[TraceEvent], workflow: str, relation: str | None) -
         if e.model is not None:  # only LLM calls record what they read
             for step in _trigger_steps(e.trigger) if e.trigger else []:
                 if step == "user_prompt":
-                    add(PROMPT, node[id(e)], "starts", e)
+                    # an agent handed its prompt by another agent's call was
+                    # started by that call (the handoff), not by the run's prompt
+                    if not (e.parent in by_id and _crosses(e, by_id)):
+                        add(PROMPT, node[id(e)], "starts", e)
                 elif step in steps_seen:
                     source = latest.get((e.run_id, e.agent, step)) or latest.get((e.run_id, step)) or step
                     if source != node[id(e)]:
