@@ -162,3 +162,17 @@ def test_the_page_gets_how_many_inputs_a_lookup_holds_not_the_inputs():
     assert page["summary"]["opportunities"][0]["lookup_entries"] == 2
     assert page["summary"]["next_steps"][0]["lookup_entries"] == 2
     assert "secret" not in json.dumps(page)
+
+
+def test_an_agents_llm_turns_are_one_card_and_another_agents_turn_of_the_same_name_its_own():
+    report = _report()
+    turns = [{"title": "llm_call ← user_prompt", "saving": 2.6, "observations": 1214, "evidence": ""},
+             {"title": "llm_call ← send_letter", "saving": 2.5, "observations": 1214, "evidence": ""}]
+    sup = {**_step("CONDITIONAL_LLM_BYPASS", ["llm_call ← user_prompt"], 5.1, "review"), "agent": "sup", "turns": turns}
+    kyc = {**_step("CONDITIONAL_LLM_BYPASS", ["llm_call ← user_prompt"], 0.4, "review"), "agent": "kyc", "turns": turns[:1]}
+    report["summary"]["next_steps"] = [sup, kyc]
+    first = _render(report)["first"]
+    assert first.count('<li class="card">') == 2
+    assert "Replace an LLM decision with a rule: 2 LLM turns of" in first
+    assert first.count("$5.10") == 1 and "$2.60" in first and "$2.50" in first
+    assert "1 LLM turn of" in first

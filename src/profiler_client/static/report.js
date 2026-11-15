@@ -60,8 +60,9 @@ const MARK = {
 // the agents a finding says repeat a call between them within a run
 const sharedBy = o => o.type === 'CROSS_AGENT_DUPLICATE' ? o.agents || [] : o.between_agents?.agents || [];
 const LLM_AFTER = 'llm_call ← ';
-// the map steps a finding is about; scripting a sequence removes the LLM calls that chose its next steps
-const findingNodes = o => o.type === 'EXTRACT_DETERMINISTIC_SUBSTEP'
+// the map steps a finding is about; scripting a sequence removes the LLM calls that chose its next steps;
+// a next step about an agent's unnamed LLM turns (``turns``) is about all of them
+const findingNodes = o => o.turns ? o.turns.map(t => t.title) : o.type === 'EXTRACT_DETERMINISTIC_SUBSTEP'
   ? [...(o.nodes || []), ...(o.nodes || []).slice(0, -1).map(n => LLM_AFTER + n)] : (o.nodes || []);
 // a finding's row in the steps table: the step it's listed under
 const rowOf = o => (o.nodes || [o.title])[0];
@@ -601,10 +602,11 @@ function renderFirst(q, data, onMap) {
   // one card per step: findings on the same calls (a cache and a rule) are options for one saving, not two savings
   const cards = [];
   steps.forEach((n, i) => {
-    const key = `${(n.nodes || [n.title]).join(' ')} ${n.identity?.agent || ''}`, card = cards.find(c => c.key === key);
+    const key = `${(n.nodes || [n.title]).join(' ')} ${n.agent || n.identity?.agent || ''}`, card = cards.find(c => c.key === key);
     if (card) card.opts.push(n); else cards.push({ key, i, opts: [n] });
   });
   q('first').innerHTML = `<ol>${cards.map(({ i, opts: [n, ...more] }) => {
+    if (n.turns) return turnsCard(n, i, labels, onMap);
     const saving = Math.max(0, ...[n, ...more].map(o => o.saving || 0));
     const opt = o => `<p>${esc(evidenceOf(o))}</p>${o.do ? `<p class="do">${esc(o.do)}</p>` : ''}<p class="risk">${esc(riskLine(o, labels))}</p>`;
     return `<li class="card">
@@ -615,6 +617,18 @@ function renderFirst(q, data, onMap) {
     ${findingNodes(n).some(id => onMap.has(id)) ? `<button type="button" class="btn-map" data-first="${i}">Show on the map</button>` : ''}
   </li>`;
   }).join('')}</ol>`;
+}
+
+// one agent's unnamed LLM turns (named by the step they came after), each always making the same choice:
+// one card, as one place in that agent's prompt to change; different calls, so their amounts add up
+function turnsCard(n, i, labels, onMap) {
+  return `<li class="card">
+    <p class="top"><span class="stepl">${esc(STEP[n.step] || n.step)}</span><span class="cost">${n.saving ? `${money(n.saving)} <span class="k">in this dataset</span>` : 'No saving counted'}</span></p>
+    <h4>${esc(title(n))}: ${esc(plural(n.turns.length, 'LLM turn'))} of ${stepName(n.agent)}</h4>
+    <ul>${n.turns.map(t => `<li><span class="where">${stepName(t.title)}</span> ${esc(evidenceOf({ type: n.type, observations: t.observations }))}${t.saving ? ` ${money(t.saving)}.` : ''}</li>`).join('')}</ul>
+    ${n.do ? `<p class="do">${esc(n.do)}</p>` : ''}<p class="risk">${esc(riskLine(n, labels))}</p>
+    ${findingNodes(n).some(id => onMap.has(id)) ? `<button type="button" class="btn-map" data-first="${i}">Show on the map</button>` : ''}
+  </li>`;
 }
 
 // "Between agents": each finding a call more than one agent repeats within a run, naming the agents
