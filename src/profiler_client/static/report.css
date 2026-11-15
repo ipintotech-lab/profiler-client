@@ -124,6 +124,7 @@
 .sheet .card .cost { font-weight: 700; font-variant-numeric: tabular-nums; }
 .sheet .card .cost .k { font-weight: 400; color: var(--ink-2); font-size: 13px; }
 .sheet .card h4 { margin: 0; font-size: 17px; }
+.sheet .card h5 { margin: 12px 0 0; font-size: 15px; }
 .sheet .card .where { font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
 .sheet .card .risk, .sheet .card .do { color: var(--ink-2); }
 .sheet .card .btn-map { margin-top: auto; align-self: flex-start; min-height: 44px; padding: 8px 14px; background: transparent; color: var(--carbon); border: 0; box-shadow: inset 0 0 0 1.5px var(--carbon); border-radius: 6px; font: 600 14px/1.2 var(--sans); cursor: pointer; }
@@ -159,6 +160,9 @@
 .sheet .tbl tr.try td { padding-top: 0; font-size: 14.5px; }
 .sheet .tbl tr.try td::before { content: none; }
 .sheet .tbl tr.more td { font-size: 14px; color: var(--ink-2); }
+.sheet .tbl tr.fold td { font-size: 14px; color: var(--ink-2); }
+.sheet .tbl tr.agent th { padding-top: 22px; font-size: 16px; color: var(--ink); text-align: left; border-bottom: 2px solid var(--ink); }
+.sheet .tbl tr.agent .k { font-weight: 400; color: var(--ink-2); margin-left: 6px; }
 @media (max-width: 700px) {
   .sheet .tbl thead { display: none; }
   .sheet .tbl tr { display: block; border-bottom: 1px solid var(--rule); padding: 10px 0; }
@@ -181,5 +185,92 @@
   .sheet .tools { display: none !important; }
   .sheet .tbl tr { break-inside: avoid; }
   .sheet .tbl tr.has-try { break-after: avoid; }  /* keep a step with its Try lines */
+  .sheet .tbl tr.agent { break-after: avoid; }  /* an agent's name stays with its first step */
   .sheet .tbl tr.more { display: none; }
+}
+/* the agent map: one box per agent and per routing decision, a details panel beside it */
+/* the agent map with its details panel beside it, the legend and hot spots under the map; on a narrow
+   screen the hot spots come first, then the map, its legend and the panel */
+.sheet .agentmap { display: grid; grid-template-columns: minmax(0, 1fr) 272px; grid-template-areas: "map panel" "legend panel" "hot panel"; gap: 12px 20px; align-items: start; }
+.sheet .agentmap .ammap { grid-area: map; }
+.sheet .agentmap .legend { grid-area: legend; margin-top: 0; }
+.sheet .agentmap .hotspots { grid-area: hot; }
+.sheet .agentmap .hotspots ol { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.sheet .ampanel { grid-area: panel; box-sizing: border-box; max-height: 640px; overflow-y: auto; padding: 14px 16px; background: var(--paper); border-left: 4px solid var(--carbon); border-radius: 0 6px 6px 0; font-size: 14px; }
+@media (max-width: 900px) {
+  .sheet .agentmap { grid-template-columns: minmax(0, 1fr); grid-template-areas: "hot" "map" "legend" "panel"; }
+  .sheet .ampanel { max-height: none; }
+}
+.sheet .ampanel .kind { margin: 0; color: var(--ink-2); font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+.sheet .ampanel h4 { margin: 4px 0 8px; font-size: 17px; overflow-wrap: anywhere; }
+.sheet .ampanel h5 { margin: 14px 0 6px; font-size: 14px; }
+.sheet .ampanel ul { margin: 0; padding-left: 18px; }
+.sheet .ampanel li { margin: 4px 0; overflow-wrap: anywhere; }
+.sheet .ampanel .finds li > span { display: block; }
+.sheet .ampanel .k, .sheet .ampanel .h { color: var(--ink-2); }
+.sheet .ampanel .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.sheet .ampanel .btn { min-height: 44px; padding: 8px 14px; background: transparent; color: var(--carbon); border: 0; box-shadow: inset 0 0 0 1.5px var(--carbon); border-radius: 6px; font: 600 14px/1.2 var(--sans); cursor: pointer; }
+.sheet .ampanel .btn:hover { background: var(--pseudo); }
+.sheet .mapbox .am { cursor: pointer; }
+.sheet .mapbox .am rect { stroke: var(--carbon); stroke-width: 1.5; }
+.sheet .mapbox .am.f0 rect { fill: var(--sheet); }
+.sheet .mapbox .am.f1 rect { fill: #e3e4f6; }
+.sheet .mapbox .am.f2 rect { fill: #c6c9ee; }
+.sheet .mapbox .am.f3 rect { fill: #a6abe2; }
+.sheet .mapbox .am.router rect { fill: var(--paper); stroke: var(--rule); }
+.sheet .mapbox .am.unstable rect { stroke: var(--bad); stroke-width: 2.5; stroke-dasharray: 6 4; }
+.sheet .mapbox .am.chip rect { stroke-width: 1; }
+.sheet .mapbox .am:hover rect, .sheet .mapbox .am:focus-visible rect { stroke-width: 3; }
+.sheet .mapbox .am:focus { outline: none; }
+.sheet .mapbox .am.sel rect { stroke: var(--ink); stroke-width: 3.5; }
+.sheet .mapbox .am .t { fill: var(--ink); font-size: 13px; font-weight: 600; }
+.sheet .mapbox .am .f { fill: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; }
+.sheet .mapbox .am .s, .sheet .mapbox .am .c { fill: var(--ink); font-size: 12px; font-family: var(--mono); }
+.sheet .mapbox .am.f0 .s, .sheet .mapbox .am.router .s { fill: var(--ink-2); }
+.sheet .mapbox .am .w { fill: var(--ink); font-size: 12px; font-weight: 600; }
+.sheet .mapbox .am .w .bad { fill: #7a161c; } /* a deeper red: 4.9:1 on the darkest fill */
+.sheet .mapbox .am circle.no { fill: var(--ink); stroke: var(--sheet); stroke-width: 2; }
+.sheet .mapbox .am text.no { fill: var(--sheet); font-size: 13px; font-weight: 700; }
+.sheet .mapbox .together rect { fill: none; stroke: var(--ink-2); stroke-dasharray: 3 3; }
+.sheet .mapbox .together text { fill: var(--ink-2); font-size: 12px; }
+.sheet .agentmap .edge { stroke-width: 1.75; }
+.sheet .mapbox .edge.return { stroke-dasharray: 7 5; }
+.sheet .mapbox .sw.f0 { background: var(--sheet); border-color: var(--carbon); margin-right: 2px; }
+.sheet .mapbox .sw.f1 { background: #e3e4f6; border-color: var(--carbon); margin-right: 2px; }
+.sheet .mapbox .sw.f2 { background: #c6c9ee; border-color: var(--carbon); margin-right: 2px; }
+.sheet .mapbox .sw.f3 { background: #a6abe2; border-color: var(--carbon); }
+.sheet .mapbox .sw.no { width: 18px; height: 18px; border-radius: 50%; background: var(--ink); color: var(--sheet); border-color: var(--ink); font: 700 12px/16px var(--sans); text-align: center; font-style: normal; }
+.sheet .mapbox .sw.dash { border: 2px dashed var(--bad); background: var(--sheet); }
+.sheet .mapbox svg.ln { display: inline; width: 28px; height: 8px; vertical-align: middle; margin-right: 6px; }
+.sheet .mapbox .ln path { stroke: var(--edge); stroke-width: 2; stroke-dasharray: 7 5; }
+.sheet .hotspots h4 { margin: 0 0 8px; font-size: 15px; }
+.sheet .hotspots ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.sheet .hotspots button { display: grid; grid-template-columns: 24px 1fr; gap: 2px 8px; width: 100%; min-height: 44px; padding: 8px 10px; text-align: left; background: var(--sheet); border: 1.5px solid var(--rule); border-radius: 6px; font: 14px/1.3 var(--sans); color: var(--ink); cursor: pointer; }
+.sheet .hotspots button b { grid-row: span 2; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--ink); color: var(--sheet); font-size: 12px; }
+.sheet .hotspots button .k { grid-column: 2; color: var(--ink-2); font-size: 13px; }
+.sheet .hotspots button .h { color: var(--ink-2); font-family: var(--mono); font-size: 12px; }
+.sheet .hotspots button:hover, .sheet .hotspots button[aria-pressed="true"] { border-color: var(--carbon); background: var(--pseudo); }
+.sheet .stepsof { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--rule); }
+.sheet .stepsof h4 { margin: 0; font-size: 16px; }
+/* on paper: the agent map alone on a landscape page at its natural size; the hot spots table and one section
+   per agent follow, each agent's section free to start a new page */
+.sheet .amprint { display: none; }
+.sheet .amprint .h { color: var(--ink-2); font-family: var(--mono); font-size: 13px; font-weight: 400; }
+.sheet .amprint .k { color: var(--ink-2); }
+.sheet .amprint .finds { padding-left: 18px; }
+.sheet .amprint .finds li > span { display: block; }
+@media print {
+  @page wide { size: landscape; }
+  .sheet section.map:has(.agentmap) { page: wide; }
+  .sheet .agentmap { display: block; break-inside: avoid; }
+  .sheet .agentmap .hotspots, .sheet .ampanel, .sheet section.map .stepsof { display: none !important; }
+  .sheet .amprint:not([hidden]) { display: block; }
+  .sheet .amprint .tbl.hot { break-inside: avoid; }
+  .sheet .amprint .agent { margin-top: 24px; }
+  .sheet .amprint h3, .sheet .amprint h4, .sheet .amprint .agent > p.k { break-after: avoid; }
+  .sheet .amprint .tbl tr { break-inside: avoid; }
+  .sheet .amprint .mapbox { break-inside: avoid; }  /* a step map with its legend */
+  .sheet .amprint .mapscroll { overflow: visible; }
+  .sheet .amprint .mapbox svg { min-width: 0 !important; }  /* shrinks to the page, never past it */
+  .sheet .amprint .mapbox:has(svg) + p.why { display: none; }  /* said once, under the first map */
 }
