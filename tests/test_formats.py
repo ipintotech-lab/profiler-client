@@ -1,7 +1,10 @@
 """Codex, OpenTelemetry, OpenAI chat and generic event logs: the same
 privacy guarantees as Claude Code transcripts, and ``--keep-names``."""
+import gzip
 import hashlib
 import json
+from collections import Counter
+from pathlib import Path
 
 import pytest
 from conftest import CANARIES, canary_forms
@@ -532,6 +535,25 @@ def test_a_decision_without_a_selection_gets_the_one_shown_by_what_followed(tmp_
               for r in rows]
     (tmp_path / "logged").mkdir()
     assert [e["node"] for e in _prepared(tmp_path / "logged", logged)] == [e["node"] for e in events]
+
+
+def test_the_loan_flow_names_every_model_turn_alike_in_both_formats(tmp_path):
+    """One day of the generator's loan flow (``generate_caseflows.py --days 1
+    --scale 0.4 --specialist-llm --vary-router-turns``, the event log also
+    with ``--log-router-turns``): the same calls, so each agent's model
+    turns get the same names in the event log and in OpenTelemetry -- a turn
+    started by an unnamed call is named after the request, a turn after an
+    agent it handed to has finished after that agent's last tool."""
+    names = {}
+    for fmt in ("events", "otlp-traces"):
+        raw = tmp_path / f"{fmt}.jsonl"
+        raw.write_bytes(gzip.decompress((Path(__file__).parent / "data" / "loan-day" / f"{fmt}.jsonl.gz").read_bytes()))
+        prepare([raw], tmp_path / fmt, Names(Pseudonymizer(new_key()), keep=True))
+        events = [json.loads(line) for line in (tmp_path / fmt / EVENTS).read_text().splitlines()[1:]]
+        names[fmt] = Counter((e["agent"], e["node"]) for e in events if e["event_type"] == "decision")
+    assert names["events"] == names["otlp-traces"]
+    assert names["events"][("kyc-verification", "llm_call ← user_prompt")]
+    assert names["events"][("intake-supervisor", "llm_call ← send_letter")]
 
 
 def test_contract_v1_datasets_are_still_read_and_a_bad_relation_is_refused(tmp_path):

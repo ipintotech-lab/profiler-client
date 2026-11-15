@@ -26,7 +26,7 @@ from collections import defaultdict
 from typing import Any
 
 from . import policy
-from .claude_code import Conversion, llm_node
+from .claude_code import Conversion, is_llm_node, llm_node
 from .names import Names, version
 
 _ALIASES: dict[str, tuple[str, ...]] = {
@@ -170,7 +170,43 @@ def _after(events: list[dict]) -> list[str | None]:
             out.append(None)
             continue
         parent = by_id.get(e.get("parent"))
-        out.append(e.get("trigger") or last_tool.get(visit) or (parent["node"] if parent else "user_prompt"))
+        named = parent is not None and not is_llm_node(parent["node"])
+        out.append(e.get("trigger") or last_tool.get(visit) or (parent["node"] if named else "user_prompt"))
+    return out
+
+
+def _returned(events: list[dict], after: list[str | None]) -> list[str | None]:
+    """The steps each decision reacted to, as OpenTelemetry names them: when
+    agents it handed to have finished since its agent's previous decision,
+    their last tools and the last tool its own agent called since then
+    (``a + b``); else ``after``. A trigger the log wrote is kept."""
+    visit_of = [(e["run_id"], e.get("agent"), e.get("parent")) for e in events]
+    by_id = {e["event_id"]: i for i, e in enumerate(events) if e.get("event_id")}
+    last_tool: dict[tuple, str] = {}
+    ended: dict[tuple, int] = {}  # a visit -> where its last event is
+    for i, (e, visit) in enumerate(zip(events, visit_of)):
+        ended[visit] = i
+        if e["event_type"] == "tool_call":
+            last_tool[visit] = e["node"]
+    started: dict[tuple, set] = defaultdict(set)  # a visit -> the visits its decisions started
+    for e, visit in zip(events, visit_of):
+        i = by_id.get(e.get("parent"))
+        if i is not None and events[i].get("agent") != e.get("agent"):
+            started[visit_of[i]].add(visit)
+    out = list(after)
+    prev: dict[tuple, int] = {}  # a visit -> its previous decision
+    own: dict[tuple, str] = {}  # a visit -> the last tool it called since then
+    for i, (e, visit) in enumerate(zip(events, visit_of)):
+        if e["event_type"] == "tool_call":
+            own[visit] = e["node"]
+        if e["event_type"] != "decision":
+            continue
+        start = prev.get(visit, -1)
+        tools = {last_tool[v] for v in started[visit] if v in last_tool and start < ended[v] < i}
+        if tools and not e.get("trigger"):
+            out[i] = " + ".join(sorted(tools | ({own[visit]} if visit in own else set())))
+        prev[visit] = i
+        own.pop(visit, None)
     return out
 
 
@@ -270,7 +306,7 @@ def split_shared_llm_names(events: list[dict]) -> None:
             kinds[e["node"]].add(pick)
     routing = {n for n, k in kinds.items() if None not in k and "step" in k}
     shared = {n for n in agents if len(agents[n]) > 1 or (len(steps[n]) > 1 and n in routing)}
-    for e, a in zip(events, after):
+    for e, a in zip(events, _returned(events, after)):
         if a is not None and e["node"] in shared:
             e["node"] = llm_node(a)
 
