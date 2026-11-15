@@ -169,6 +169,11 @@ def llm_node(trigger: str) -> str:
     return f"llm_call ← {first.split(': ')[0]}"
 
 
+def is_llm_node(node: str) -> bool:
+    """An unnamed LLM call's node (``llm_node``)."""
+    return node.startswith("llm_call ← ")
+
+
 def ts_ms(record: dict) -> float | None:
     ts = record.get("timestamp")
     if not isinstance(ts, str) or not ts:

@@ -47,7 +47,7 @@ from collections import defaultdict
 from typing import Any
 
 from . import policy
-from .claude_code import Conversion, Namer, llm_node
+from .claude_code import Conversion, Namer, is_llm_node, llm_node
 from .names import Names
 
 _LLM_OPERATIONS = ("chat", "text_completion", "generate_content")
@@ -257,7 +257,9 @@ def convert_otel_export(rows: list[dict], names: Names) -> Conversion:
                         trigger_parts.add(inner.last_tool)
                 here.returned = [a for a in here.returned
                                  if int(trace.agents[a].span.get("endTimeUnixNano") or 0) > start]
-                trigger = " + ".join(sorted(trigger_parts)) or (source["node"] if source else "user_prompt")
+                # started by an unnamed call: nothing named came before it, as the event log sees it
+                named = source is not None and not is_llm_node(source["node"])
+                trigger = " + ".join(sorted(trigger_parts)) or (source["node"] if named else "user_prompt")
                 here.trigger_parts = set()
                 finish = _first(attrs, "gen_ai.response.finish_reasons")
                 finish = finish[0] if isinstance(finish, list) and finish else finish
