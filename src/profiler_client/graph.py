@@ -202,7 +202,10 @@ def _agent_graph(events: list[TraceEvent], node: dict[int, str], by_id: dict[str
                  links: dict, kinds: dict, h: dict) -> dict:
     """The graph one level up: agents and the decisions between them (see the module docstring)."""
     total = sum(e.cost for e in events)
-    share = (lambda cost: round(cost / total, 3) if total else 0.0)
+
+    def share(cost):
+        return round(cost / total, 3) if total else 0.0
+
     runs: dict[str, set] = defaultdict(set)
     steps: dict[str, set] = defaultdict(set)
     cost: dict[str, float] = defaultdict(float)

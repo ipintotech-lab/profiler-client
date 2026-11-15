@@ -97,7 +97,8 @@ def layout(agent_graph: dict) -> dict | None:
     top = MARGIN + (BAR + S + DH + CHANNEL if router else LABEL + S)  # without a router, room above for a side route and its label
     alongside = {a["id"]: set(a["alongside"]) for a in lower}
     height_of = {a["id"]: AH + (len(chips[a["id"]]) * CHIP + S if chips[a["id"]] else 0) for a in lower}
-    col_x = lambda c: MARGIN + LEFT + (c % per_row) * (AW + GAP)
+    def col_x(c):
+        return MARGIN + LEFT + (c % per_row) * (AW + GAP)
 
     boxes, frames = [], []
     rect: dict[str, tuple[int, int, int, int]] = {}
@@ -122,7 +123,9 @@ def layout(agent_graph: dict) -> dict | None:
                 frames.append({"id": fid, "x": x - PAD, "y": y0 - PAD, "w": AW + 2 * PAD, "h": h,
                                "agents": [a["id"] for a in together]})
                 y = y0 - PAD + h + STACK
-            under = lambda hosts: [d for d in lower if detour.get(d["id"]) in hosts]
+            def under(hosts):
+                return [d for d in lower if detour.get(d["id"]) in hosts]
+
             for a in under({t["id"] for t in together}) + [b for c in alone for b in [c, *under({c["id"]})]]:
                 if a["id"] in detour:  # right under the agent it returns to, with room for its label
                     y += BACK - STACK
@@ -163,8 +166,12 @@ def layout(agent_graph: dict) -> dict | None:
         boxes.append({"id": d, "kind": "decision", "x": x, "y": y, "w": w, "h": h})
 
     # the links to draw, end to end: a chip's links start or end at its agent's box, a framed agent's at its frame
-    at = lambda d: d if d in in_lane else frame_of.get(owner[d], owner[d])
-    end = lambda a: frame_of.get(a, a)
+    def at(d):
+        return d if d in in_lane else frame_of.get(owner[d], owner[d])
+
+    def end(a):
+        return frame_of.get(a, a)
+
     pairs: dict[tuple[str, str], list[int]] = defaultdict(list)
     for i, x in enumerate(agent_graph["links"]):
         if x["kind"] == "reads":
