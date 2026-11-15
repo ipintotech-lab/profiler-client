@@ -20,9 +20,10 @@ Every record needs a trace, run, workflow, event type and node. Then:
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import Any
 
-from .claude_code import Conversion
+from .claude_code import Conversion, llm_node
 from .names import Names, version
 
 _ALIASES: dict[str, tuple[str, ...]] = {
@@ -150,8 +151,54 @@ def _convert(raw: dict, names: Names) -> dict:
     return event
 
 
+def _after(events: list[dict]) -> list[str | None]:
+    """For each decision, the step it came after: its ``trigger``, else the
+    last tool its agent called in this visit (same run, agent and parent),
+    else the step that started the visit, else ``user_prompt``. None for
+    other events."""
+    by_id = {e["event_id"]: e for e in events if e.get("event_id")}
+    last_tool: dict[tuple, str] = {}
+    out: list[str | None] = []
+    for e in events:
+        visit = (e["run_id"], e.get("agent"), e.get("parent"))
+        if e["event_type"] == "tool_call":
+            last_tool[visit] = e["node"]
+        if e["event_type"] != "decision":
+            out.append(None)
+            continue
+        parent = by_id.get(e.get("parent"))
+        out.append(e.get("trigger") or last_tool.get(visit) or (parent["node"] if parent else "user_prompt"))
+    return out
+
+
+def split_shared_llm_names(events: list[dict]) -> None:
+    """A log that names every model turn alike (``next_action``, ``agent``)
+    names no step: when one decision name is used by several agents, or
+    comes after different steps and only ever picks a step (a tool, an
+    agent, ``respond``), each of its calls is renamed as
+    OpenTelemetry names a turn it has no name for -- by the step it came
+    after (``llm_call ← <step>``), so turns of different agents and places
+    in the flow are told apart."""
+    after = _after(events)
+    known = {e["node"] for e in events} | {e.get("agent") for e in events} | {"respond"}
+    agents: dict[str, set] = defaultdict(set)
+    steps: dict[str, set] = defaultdict(set)
+    picks_step: dict[str, bool] = defaultdict(lambda: True)
+    for e, a in zip(events, after):
+        if a is not None:
+            agents[e["node"]].add(e.get("agent"))
+            steps[e["node"]].add(a)
+            selected = (e.get("decision") or {}).get("selected")
+            picks_step[e["node"]] &= selected is not None and set(selected.split("+")) <= known
+    shared = {n for n in agents if len(agents[n]) > 1 or (len(steps[n]) > 1 and picks_step[n])}
+    for e, a in zip(events, after):
+        if a is not None and e["node"] in shared:
+            e["node"] = llm_node(a)
+
+
 def convert_event_log(rows: list, names: Names) -> Conversion:
     events = [{**_convert(r, names), "_source": where} for where, r in located(rows)]
+    split_shared_llm_names(events)
     traces = {e["trace_id"] for e in events}
     with_cost = {e["trace_id"] for e in events if e.get("cost", 0) > 0}
     return Conversion(events=events, sessions=len(traces), sessions_without_cost=len(traces - with_cost))

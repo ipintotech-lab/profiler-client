@@ -430,6 +430,35 @@ def test_an_event_log_keeps_its_own_ids_and_parents_as_pseudonyms(tmp_path):
     assert "acme-evt-1" not in (tmp_path / "ready" / EVENTS).read_text()
 
 
+def test_an_event_log_turn_name_shared_by_agents_is_split_as_otel_names_turns(tmp_path):
+    """Every model turn logged as ``next_action``: each call is renamed by
+    the step it came after, as OpenTelemetry names an unnamed turn. A
+    named choice of one agent (``choose_template``) keeps its name even
+    when reached from different steps, since it doesn't pick a step."""
+    def ev(i, agent, kind, node, parent=None, selected=None):
+        row = {"trace_id": "t1", "run_id": "r1", "workflow": "loans", "agent": agent, "event_id": f"e{i}",
+               "event_type": kind, "node": node}
+        if parent:
+            row["parent"] = f"e{parent}"
+        if selected:
+            row["decision"] = {"type": "next_action", "selected": selected}
+        return row
+    rows = [ev(1, "sup", "decision", "next_action", selected="get_app"),
+            ev(2, "sup", "tool_call", "get_app"),
+            ev(3, "sup", "decision", "next_action", selected="kyc"),
+            ev(4, "kyc", "decision", "next_action", parent=3, selected="lookup"),
+            ev(5, "kyc", "tool_call", "lookup", parent=3),
+            ev(6, "kyc", "decision", "next_action", parent=3, selected="respond"),
+            ev(7, "letter", "decision", "choose_template", parent=3, selected="tpl-a"),
+            ev(8, "letter", "decision", "choose_template", parent=5, selected="tpl-b")]
+    path = _write(tmp_path, "events.jsonl", rows)
+    prepare([path], tmp_path / "ready", Names(Pseudonymizer(new_key()), keep=True))
+    events = [json.loads(line) for line in (tmp_path / "ready" / EVENTS).read_text().splitlines()[1:]]
+    assert [e["node"] for e in events] == [
+        "llm_call ← user_prompt", "get_app", "llm_call ← get_app",
+        "llm_call ← next_action", "lookup", "llm_call ← lookup", "choose_template", "choose_template"]
+
+
 def test_contract_v1_datasets_are_still_read_and_a_bad_relation_is_refused(tmp_path):
     out, _, _ = _prepare(tmp_path, "codex")
     seal_line, body = (out / EVENTS).read_bytes().split(b"\n", 1)
