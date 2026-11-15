@@ -500,6 +500,40 @@ def test_one_agents_name_after_different_steps_is_split_only_when_it_routes(tmp_
     assert nodes == (["llm_call ← x", "llm_call ← z"] if split else ["think", "think"])
 
 
+def _prepared(tmp_path, rows):
+    path = _write(tmp_path, "events.jsonl", rows)
+    prepare([path], tmp_path / "ready", Names(Pseudonymizer(new_key()), keep=True))
+    return [json.loads(line) for line in (tmp_path / "ready" / EVENTS).read_text().splitlines()[1:]]
+
+
+def test_a_decision_without_a_selection_gets_the_one_shown_by_what_followed(tmp_path):
+    def ev(i, agent, kind, node, parent=None, **extra):
+        row = {"trace_id": "t", "run_id": "r", "workflow": "w", "agent": agent, "event_id": f"e{i}",
+               "event_type": kind, "node": node, **extra}
+        return row | ({"parent": f"e{parent}"} if parent else {})
+    rows = [ev(1, "sup", "decision", "turn", finish_reason="tool_calls"),   # -> tool
+            ev(2, "sup", "tool_call", "get_app"),
+            ev(3, "sup", "decision", "route"),                              # -> handoff, no finish reason needed
+            ev(4, "kyc", "decision", "turn", parent=3, stop_reason="tool_use"),
+            ev(5, "kyc", "tool_call", "lookup", parent=3),
+            ev(6, "kyc", "decision", "turn", parent=3, finish_reason="stop"),  # stopped: answered
+            ev(7, "sup", "decision", "write"),                              # no finish reason: can't tell
+            ev(8, "sup", "decision", "write", finish_reason="tool_calls"),  # but no tool came
+            ev(9, "sup", "decision", "pick", finish_reason="tool_calls",     # a logged selection is kept
+               decision={"type": "pick", "selected": "tpl-a"}),
+            ev(10, "sup", "tool_call", "send")]
+    events = _prepared(tmp_path, rows)
+    assert [(e.get("decision") or {}).get("selected") for e in events if e["event_type"] == "decision"] == \
+        ["get_app", "kyc", "lookup", "respond", None, None, "tpl-a"]
+    # the same log with those selections written in, and no finish reasons, finds the same names
+    picked = {"e1": "get_app", "e3": "kyc", "e4": "lookup", "e6": "respond"}
+    logged = [{k: v for k, v in r.items() if not k.endswith("_reason")}
+              | ({"decision": {"type": "next_action", "selected": picked[r["event_id"]]}} if r["event_id"] in picked else {})
+              for r in rows]
+    (tmp_path / "logged").mkdir()
+    assert [e["node"] for e in _prepared(tmp_path / "logged", logged)] == [e["node"] for e in events]
+
+
 def test_contract_v1_datasets_are_still_read_and_a_bad_relation_is_refused(tmp_path):
     out, _, _ = _prepare(tmp_path, "codex")
     seal_line, body = (out / EVENTS).read_bytes().split(b"\n", 1)

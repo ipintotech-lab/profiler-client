@@ -10,7 +10,9 @@ Every record needs a trace, run, workflow, event type and node. Then:
 * **Names** -- workflow, agent, node, tool, event type, decision type and
   selection, trigger -- are pseudonyms unless ``--keep-names``.
   ``llm``/``llm_call``/``chat``/``completion`` events become ``decision``
-  and ``tool``/``function_call`` events ``tool_call``.
+  and ``tool``/``function_call`` events ``tool_call``. A decision with no
+  ``decision.selected`` gets the one the log shows from what followed it
+  and how it finished (``fill_selections``).
 * **Contents** -- ``input_state`` (one pseudonym for the whole dict) and
   ``result`` (``success:``/``error:`` plus a pseudonym of the value) --
   are always pseudonyms.
@@ -185,13 +187,9 @@ def _finish(raw: dict) -> str | None:
     return None
 
 
-def _picks(events: list[dict], finishes: list[str | None]) -> list[str | None]:
-    """For each decision, what the log shows it picked: ``"step"`` when its
-    call ended in the tool call that came next in its visit, or a handoff
-    to another agent; ``"respond"`` when it ended the visit; None when it
-    did its own work (a template, a score) or the log can't tell. With a
-    ``decision.selected``, that selection must be what followed; without,
-    a tool-calling finish reason followed by a tool call counts."""
+def _followers(events: list[dict]) -> tuple[list[dict | None], dict[str, set]]:
+    """Each event's next event in its visit (same run, agent and parent),
+    and for each event id the agents of the events parented to it."""
     nxt: list[dict | None] = [None] * len(events)
     pending: dict[tuple, int] = {}
     handed: dict[str, set] = defaultdict(set)
@@ -203,26 +201,54 @@ def _picks(events: list[dict], finishes: list[str | None]) -> list[str | None]:
             pending[visit] = i
         if e.get("parent"):
             handed[e["parent"]].add(e.get("agent"))
-    out: list[str | None] = []
+    return nxt, handed
+
+
+def fill_selections(events: list[dict], finishes: list[str | None]) -> None:
+    """A decision the log gives no ``decision.selected`` picked what followed
+    it, as the other readers take a model call's choice from what it called:
+    a tool-calling finish reason followed by a tool call picked that tool;
+    events of other agents parented to it are a handoff to them; a call that
+    stopped with neither answered (``respond``, as the OpenTelemetry and chat
+    readers name a call that called no tool). Anything else is left without
+    a selection: the log can't tell what it picked."""
+    nxt, handed = _followers(events)
     for e, after, finish in zip(events, nxt, finishes):
-        if e["event_type"] != "decision":
+        if e["event_type"] != "decision" or (e.get("decision") or {}).get("selected") is not None:
+            continue
+        chosen = handed.get(e.get("event_id"), set()) - {e.get("agent")}
+        if finish in _TOOL_FINISH and after is not None and after["event_type"] == "tool_call":
+            chosen.add(after["node"])
+        if not chosen and finish in policy.STOP_REASONS - _TOOL_FINISH:
+            chosen = {"respond"}
+        if chosen:
+            e["decision"] = {"type": "next_action", "selected": "+".join(sorted(chosen))}
+
+
+def _picks(events: list[dict]) -> list[str | None]:
+    """For each decision, what the log shows it picked: ``"step"`` when its
+    ``decision.selected`` is what came next -- the tool call that followed
+    in its visit, or a handoff to another agent; ``"respond"`` when it
+    selected that and ended the visit; None when it did its own work (a
+    template, a score) or the log can't tell."""
+    nxt, handed = _followers(events)
+    out: list[str | None] = []
+    for e, after in zip(events, nxt):
+        selected = (e.get("decision") or {}).get("selected")
+        if e["event_type"] != "decision" or selected is None:
             out.append(None)
             continue
         handoff = handed.get(e.get("event_id"), set()) - {e.get("agent")}
         tool = after["node"] if after is not None and after["event_type"] == "tool_call" else None
-        selected = (e.get("decision") or {}).get("selected")
-        if selected is not None:
-            chosen = set(selected.split("+"))
-            if chosen == {"respond"}:
-                out.append("respond" if after is None and not handoff else None)
-            else:
-                out.append("step" if chosen <= handoff | ({tool} if tool else set()) else None)
+        chosen = set(selected.split("+"))
+        if chosen == {"respond"}:
+            out.append("respond" if after is None and not handoff else None)
         else:
-            out.append("step" if finish in _TOOL_FINISH and tool else None)
+            out.append("step" if chosen <= handoff | ({tool} if tool else set()) else None)
     return out
 
 
-def split_shared_llm_names(events: list[dict], finishes: list[str | None] | None = None) -> None:
+def split_shared_llm_names(events: list[dict]) -> None:
     """A log that names every model turn alike (``next_action``, ``agent``)
     names no step: when one decision name is used by several agents, or
     comes after different steps and is a routing turn -- every call picks
@@ -233,7 +259,7 @@ def split_shared_llm_names(events: list[dict], finishes: list[str | None] | None
     in the flow are told apart. A named step that does its own work keeps
     its name."""
     after = _after(events)
-    picks = _picks(events, finishes or [None] * len(events))
+    picks = _picks(events)
     agents: dict[str, set] = defaultdict(set)
     steps: dict[str, set] = defaultdict(set)
     kinds: dict[str, set] = defaultdict(set)
@@ -252,7 +278,8 @@ def split_shared_llm_names(events: list[dict], finishes: list[str | None] | None
 def convert_event_log(rows: list, names: Names) -> Conversion:
     rows = located(rows)
     events = [{**_convert(r, names), "_source": where} for where, r in rows]
-    split_shared_llm_names(events, [_finish(r) for _, r in rows])
+    fill_selections(events, [_finish(r) for _, r in rows])
+    split_shared_llm_names(events)
     traces = {e["trace_id"] for e in events}
     with_cost = {e["trace_id"] for e in events if e.get("cost", 0) > 0}
     return Conversion(events=events, sessions=len(traces), sessions_without_cost=len(traces - with_cost))
