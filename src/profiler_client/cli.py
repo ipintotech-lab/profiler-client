@@ -21,7 +21,7 @@ from pathlib import Path
 
 from . import __version__, policy
 from .contract import CONTRACT_VERSION, TraceEvent
-from .dataset import EVENTS, PrepareError, convert_file, prepare, read_sealed, summary, validate
+from .dataset import EVENTS, PrepareError, convert_file, prepare, read_sealed, subagents_across, summary, validate
 from .names import Names
 from .pseudonym import TOKEN, Pseudonymizer, load_or_create_key, new_key
 from .readiness import readiness, remediation, workflows
@@ -84,9 +84,11 @@ def _check(args: argparse.Namespace) -> int:
     prices = _prices(args.prices)
     names = Names(Pseudonymizer(new_key()))
     events, formats, skipped = [], Counter(), []
-    for path in (Path(p) for p in args.files):
+    paths = [Path(p) for p in args.files]
+    subagents = subagents_across(paths)
+    for path in paths:
         try:
-            source, conversion = convert_file(path, names)
+            source, conversion = convert_file(path, names, subagents)
         except PrepareError as exc:
             skipped.append({"file": path.name if args.names else None, "code": exc.code})
             continue

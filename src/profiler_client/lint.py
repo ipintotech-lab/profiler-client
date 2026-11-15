@@ -36,6 +36,14 @@ def _is_name(value: Any, allowed: frozenset[str], kept: frozenset[str]) -> bool:
     return isinstance(value, str) and (value in allowed or value in kept or bool(_TOKEN_RE.match(value)))
 
 
+def _is_agent(value: Any, kept: frozenset[str]) -> bool:
+    """A policy agent, or a Claude Code subagent named by a built-in type,
+    a pseudonym or a kept name."""
+    if isinstance(value, str) and value.startswith(policy.SUBAGENT_PREFIX):
+        return _is_name(value.removeprefix(policy.SUBAGENT_PREFIX), policy.SUBAGENT_TYPES, kept)
+    return _is_name(value, policy.AGENTS, kept)
+
+
 def _is_workflow(value: Any, kept: frozenset[str]) -> bool:
     if not isinstance(value, str):
         return False
@@ -61,7 +69,7 @@ def check_event(event: dict, kept: frozenset[str] = frozenset()) -> list[str]:
         elif key == "workflow":
             _check_string(key, value, _is_workflow(value, kept), problems)
         elif key == "agent":
-            _check_string(key, value, _is_name(value, policy.AGENTS, kept), problems)
+            _check_string(key, value, _is_agent(value, kept), problems)
         elif key == "event_type":
             _check_string(key, value, _is_name(value, policy.EVENT_TYPES, kept), problems)
         elif key in ("node", "trigger"):

@@ -1,0 +1,94 @@
+name: release-tag
+
+# Release = a vX.Y.Z tag on a commit of main (what the server pins and users
+# install). Run by hand (Actions -> release-tag -> Run workflow, or the API):
+# the tag is the version in pyproject.toml at that commit, created only after
+# the tests pass there and only if it doesn't exist yet. Nothing is published
+# anywhere else.
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Commit on main to tag (full SHA). Empty = the tip of main."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-tag
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.pick.outputs.sha }}
+      tag: ${{ steps.pick.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - id: pick
+        env:
+          COMMIT: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          sha="${COMMIT:-$(git rev-parse origin/main)}"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::commit must be a full 40-character SHA"; exit 1
+          fi
+          if ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "::error::$sha is not on main"; exit 1
+          fi
+          version="$(git show "$sha:pyproject.toml" | sed -n 's/^version = "\([0-9][0-9.]*\)"$/\1/p')"
+          init="$(git show "$sha:src/profiler_client/__init__.py" | sed -n 's/^__version__ = "\([0-9][0-9.]*\)"$/\1/p')"
+          if [ -z "$version" ] || [ "$version" != "$init" ]; then
+            echo "::error::pyproject.toml ($version) and __init__.py ($init) disagree on the version"; exit 1
+          fi
+          tag="v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::$tag already exists (at $(git rev-parse "$tag^{commit}"))"; exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "will tag $sha as $tag" >> "$GITHUB_STEP_SUMMARY"
+
+  test:
+    needs: check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check.outputs.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e '.[dev]' ruff
+      - run: ruff check src tests
+      - run: pytest -q
+
+  tag:
+    needs: [check, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - env:
+          SHA: ${{ needs.check.outputs.sha }}
+          TAG: ${{ needs.check.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git tag "$TAG" "$SHA"
+          git push origin "refs/tags/$TAG"
+          echo "tagged $SHA as $TAG" >> "$GITHUB_STEP_SUMMARY"
