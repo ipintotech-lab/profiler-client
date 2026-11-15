@@ -24,6 +24,7 @@ from collections import defaultdict
 from typing import Any
 
 from .claude_code import Conversion, llm_node
+from . import policy
 from .names import Names, version
 
 _ALIASES: dict[str, tuple[str, ...]] = {
@@ -171,34 +172,87 @@ def _after(events: list[dict]) -> list[str | None]:
     return out
 
 
-def split_shared_llm_names(events: list[dict]) -> None:
+_TOOL_FINISH = frozenset({"tool_calls", "tool_use", "function_call"})
+
+
+def _finish(raw: dict) -> str | None:
+    """Why the model call stopped, as the log wrote it (``finish_reason``,
+    ``stop_reason``, or a bare reason as its ``result``)."""
+    for key in ("finish_reason", "finishReason", "stop_reason", "stopReason", "result"):
+        value = raw.get(key)
+        if isinstance(value, str) and value in policy.STOP_REASONS | _TOOL_FINISH:
+            return value
+    return None
+
+
+def _picks(events: list[dict], finishes: list[str | None]) -> list[str | None]:
+    """For each decision, what the log shows it picked: ``"step"`` when its
+    call ended in the tool call that came next in its visit, or a handoff
+    to another agent; ``"respond"`` when it ended the visit; None when it
+    did its own work (a template, a score) or the log can't tell. With a
+    ``decision.selected``, that selection must be what followed; without,
+    a tool-calling finish reason followed by a tool call counts."""
+    nxt: list[dict | None] = [None] * len(events)
+    pending: dict[tuple, int] = {}
+    handed: dict[str, set] = defaultdict(set)
+    for i, e in enumerate(events):
+        visit = (e["run_id"], e.get("agent"), e.get("parent"))
+        if visit in pending:
+            nxt[pending.pop(visit)] = e
+        if e["event_type"] == "decision":
+            pending[visit] = i
+        if e.get("parent"):
+            handed[e["parent"]].add(e.get("agent"))
+    out: list[str | None] = []
+    for e, after, finish in zip(events, nxt, finishes):
+        if e["event_type"] != "decision":
+            out.append(None)
+            continue
+        handoff = handed.get(e.get("event_id"), set()) - {e.get("agent")}
+        tool = after["node"] if after is not None and after["event_type"] == "tool_call" else None
+        selected = (e.get("decision") or {}).get("selected")
+        if selected is not None:
+            chosen = set(selected.split("+"))
+            if chosen == {"respond"}:
+                out.append("respond" if after is None and not handoff else None)
+            else:
+                out.append("step" if chosen <= handoff | ({tool} if tool else set()) else None)
+        else:
+            out.append("step" if finish in _TOOL_FINISH and tool else None)
+    return out
+
+
+def split_shared_llm_names(events: list[dict], finishes: list[str | None] | None = None) -> None:
     """A log that names every model turn alike (``next_action``, ``agent``)
     names no step: when one decision name is used by several agents, or
-    comes after different steps and only ever picks a step (a tool, an
-    agent, ``respond``), each of its calls is renamed as
-    OpenTelemetry names a turn it has no name for -- by the step it came
+    comes after different steps and is a routing turn -- every call picks
+    the next step (a tool call, a handoff, the final reply; see ``_picks``)
+    and some pick a tool or an agent -- each of its calls is renamed as
+    OpenTelemetry names a turn it has no name for: by the step it came
     after (``llm_call ← <step>``), so turns of different agents and places
-    in the flow are told apart."""
+    in the flow are told apart. A named step that does its own work keeps
+    its name."""
     after = _after(events)
-    known = {e["node"] for e in events} | {e.get("agent") for e in events} | {"respond"}
+    picks = _picks(events, finishes or [None] * len(events))
     agents: dict[str, set] = defaultdict(set)
     steps: dict[str, set] = defaultdict(set)
-    picks_step: dict[str, bool] = defaultdict(lambda: True)
-    for e, a in zip(events, after):
+    kinds: dict[str, set] = defaultdict(set)
+    for e, a, pick in zip(events, after, picks):
         if a is not None:
             agents[e["node"]].add(e.get("agent"))
             steps[e["node"]].add(a)
-            selected = (e.get("decision") or {}).get("selected")
-            picks_step[e["node"]] &= selected is not None and set(selected.split("+")) <= known
-    shared = {n for n in agents if len(agents[n]) > 1 or (len(steps[n]) > 1 and picks_step[n])}
+            kinds[e["node"]].add(pick)
+    routing = {n for n, k in kinds.items() if None not in k and "step" in k}
+    shared = {n for n in agents if len(agents[n]) > 1 or (len(steps[n]) > 1 and n in routing)}
     for e, a in zip(events, after):
         if a is not None and e["node"] in shared:
             e["node"] = llm_node(a)
 
 
 def convert_event_log(rows: list, names: Names) -> Conversion:
-    events = [{**_convert(r, names), "_source": where} for where, r in located(rows)]
-    split_shared_llm_names(events)
+    rows = located(rows)
+    events = [{**_convert(r, names), "_source": where} for where, r in rows]
+    split_shared_llm_names(events, [_finish(r) for _, r in rows])
     traces = {e["trace_id"] for e in events}
     with_cost = {e["trace_id"] for e in events if e.get("cost", 0) > 0}
     return Conversion(events=events, sessions=len(traces), sessions_without_cost=len(traces - with_cost))

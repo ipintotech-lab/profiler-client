@@ -459,6 +459,47 @@ def test_an_event_log_turn_name_shared_by_agents_is_split_as_otel_names_turns(tm
         "llm_call ← next_action", "lookup", "llm_call ← lookup", "choose_template", "choose_template"]
 
 
+def _split_nodes(tmp_path, rows):
+    path = _write(tmp_path, "events.jsonl", rows)
+    prepare([path], tmp_path / "ready", Names(Pseudonymizer(new_key()), keep=True))
+    return [json.loads(line)["node"] for line in (tmp_path / "ready" / EVENTS).read_text().splitlines()[1:]]
+
+
+def _one_agent(turns):
+    """One agent's run per turn: a tool, then a ``think`` call (with what it
+    selected, or how it finished), then what came after it."""
+    rows = []
+    for i, (before, extra, then) in enumerate(turns):
+        base = {"trace_id": f"t{i}", "run_id": f"r{i}", "workflow": "w", "agent": "a"}
+        rows.append({**base, "event_type": "tool_call", "node": before})
+        rows.append({**base, "event_type": "decision", "node": "think", **extra})
+        if then:
+            rows.append({**base, "event_type": "tool_call", "node": then})
+    return rows
+
+
+@pytest.mark.parametrize("turns, split", [
+    # every call picks the tool that came next, or ends the visit: a routing turn
+    ([("x", {"decision": {"type": "next_action", "selected": "y"}}, "y"),
+      ("z", {"decision": {"type": "next_action", "selected": "respond"}}, None)], True),
+    # some calls pick a step, one does its own work: keeps its name
+    ([("x", {"decision": {"type": "next_action", "selected": "y"}}, "y"),
+      ("z", {"decision": {"type": "pick", "selected": "tpl-a"}}, "y")], False),
+    # a selection that isn't what followed doesn't count
+    ([("x", {"decision": {"type": "next_action", "selected": "y"}}, "q"),
+      ("z", {"decision": {"type": "next_action", "selected": "y"}}, "y")], False),
+    # only respond: nothing shows it routes
+    ([("x", {"decision": {"type": "next_action", "selected": "respond"}}, None),
+      ("z", {"decision": {"type": "next_action", "selected": "respond"}}, None)], False),
+    # no selection: a tool-calling finish reason followed by a tool call counts
+    ([("x", {"finish_reason": "tool_calls"}, "y"), ("z", {"stop_reason": "tool_use"}, "q")], True),
+    ([("x", {"finish_reason": "tool_calls"}, "y"), ("z", {"finish_reason": "stop"}, "q")], False),
+])
+def test_one_agents_name_after_different_steps_is_split_only_when_it_routes(tmp_path, turns, split):
+    nodes = [n for n in _split_nodes(tmp_path, _one_agent(turns)) if n == "think" or n.startswith("llm_call")]
+    assert nodes == (["llm_call ← x", "llm_call ← z"] if split else ["think", "think"])
+
+
 def test_contract_v1_datasets_are_still_read_and_a_bad_relation_is_refused(tmp_path):
     out, _, _ = _prepare(tmp_path, "codex")
     seal_line, body = (out / EVENTS).read_bytes().split(b"\n", 1)
