@@ -24,8 +24,8 @@ call's trigger is the tools that ran since the agent's previous LLM call,
 and its selection the tools that run until the next. Agents running side
 by side so don't mix their calls. A tool span's ``parent`` is its own
 parent span when that is an LLM or tool call; when it is a skipped span
-(an agent or chain), the parent is the LLM call that selected the tool, so
-the map can still draw which call chose it.
+(an agent or chain), the parent is the LLM call that ran before the tool,
+marked ``parent_by="order"``: the map draws it as "ran next", not as a choice.
 
 Handoffs between agents: the first call in an agent span gets as parent
 the call that handed over to it -- the span the agent span links to
@@ -312,7 +312,7 @@ def convert_otel_export(rows: list[dict], names: Names) -> Conversion:
             else:
                 result = "no_result"
             if llm is not None and span.get("parentSpanId") not in kept and source is None:
-                event["parent"] = llm["event_id"]
+                event["parent"], event["parent_by"] = llm["event_id"], "order"
             tool_event = {
                 **event,
                 "event_type": "tool_call",

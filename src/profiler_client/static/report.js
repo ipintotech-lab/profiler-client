@@ -139,6 +139,14 @@ const MAP_NONE = {
   NO_PARENT_LINKS: "No map: no step in this dataset names the step that started it, so there are no links to draw. The map isn't guessed from the order steps ran in.",
 };
 const MAP_LINKS = 14;
+// what each kind of map link means; "ran next" is only step order, so it is never called a choice
+const LINK_KIND = {
+  invokes: { word: 'chose', legend: 'chose: the trace records which call started this step' },
+  reads_result: { word: 'read the result of', legend: 'read the result of: the next LLM call read this step’s result' },
+  follows: { word: 'ran next', legend: 'ran next: taken from the order steps ran in; the trace records no link', dashed: true },
+  linked: { word: 'linked', legend: 'linked: a parent link your log records' },
+};
+const ORDER_NOTE = 'Built from step order within each run. Steps that ran in parallel may appear in sequence.';
 const MAP_T = 18, MAP_S = 21;  // characters that fit a map box's title line and its smaller lines
 const MAP_MIN_SCALE = 0.8;  // a map never shrinks below this to fit its box: a wider one scrolls sideways inside it
 const MAP_END = { '@prompt': 'Prompt', '@reply': 'Reply' };
@@ -286,8 +294,8 @@ function renderMap(q, data, all = false) {
     if (handoff(e)) {  // to the next agent's band: out of the bottom, into the top, labelled with the runs that took it
       const down = b.y > a.y, x1 = a.cx, y1 = down ? a.y + a.h : a.y, x2 = b.cx, y2 = down ? b.y - 2 : b.y + b.h + 2, mid = (y1 + y2) / 2;
       const from = agents[bandOf(e.from)], to = agents[bandOf(e.to)], tag = handoffTag(e);
-      return `<path class="edge handoff${e.loop ? ' return' : ''}" d="M${x1},${y1} C${x1},${mid} ${x2},${mid} ${x2},${y2}" stroke-width="${w.toFixed(1)}" marker-end="url(#mapArrow)">` +
-        `<title>${esc(plainName(from))} ${e.loop ? 'hands back' : 'hands over'} to ${esc(plainName(to))}: ${esc(label(e.from))} → ${esc(label(e.to))} in ${esc(plural(e.distinct_run_count, 'run'))}${tag ? `; ${esc(tag)}` : ''}</title></path>` +
+      return `<path class="edge handoff k-${esc(e.kind)}${e.loop ? ' return' : ''}" d="M${x1},${y1} C${x1},${mid} ${x2},${mid} ${x2},${y2}" stroke-width="${w.toFixed(1)}" marker-end="url(#mapArrow)">` +
+        `<title>${esc(plainName(from))} ${e.loop ? 'hands back' : 'hands over'} to ${esc(plainName(to))}: ${esc(label(e.from))} → ${esc(label(e.to))} in ${esc(plural(e.distinct_run_count, 'run'))}${tag ? `; ${esc(tag)}` : ''}${LINK_KIND[e.kind] ? ` (${esc(LINK_KIND[e.kind].word)})` : ''}</title></path>` +
         `<text class="edge-n" x="${(x1 + x2) / 2 + 8}" y="${mid + 4}">${esc(tag || plural(e.distinct_run_count, 'run'))}</text>`;
     }
     let d, lx, ly, anchor = 'middle';
@@ -306,8 +314,9 @@ function renderMap(q, data, all = false) {
       const x1 = a.cx, x2 = b.cx, y1 = a.y, y2 = b.y - 2, high = Math.min(y1, y2) - 34;
       d = `M${x1},${y1} C${x1},${high} ${x2},${high} ${x2},${y2}`; lx = (x1 + x2) / 2; ly = high + 8;
     }
-    return `<path class="edge${isHot ? ' hot' : ''}" d="${d}" stroke-width="${w.toFixed(1)}" marker-end="url(#${isHot ? 'mapArrowHot' : 'mapArrow'})">` +
-      `<title>${esc(label(e.from))} → ${esc(label(e.to))}: ${esc(plural(e.transition_count, 'time'))} in ${esc(plural(e.distinct_run_count, 'run'))}${splits(e) ? `, ${share(e)} of what left ${esc(label(e.from))}` : ''}</title></path>` +
+    const kind = LINK_KIND[e.kind];
+    return `<path class="edge k-${esc(e.kind)}${isHot ? ' hot' : ''}" d="${d}" stroke-width="${w.toFixed(1)}" marker-end="url(#${isHot ? 'mapArrowHot' : 'mapArrow'})">` +
+      `<title>${esc(label(e.from))} → ${esc(label(e.to))}${kind ? ` (${esc(kind.word)})` : ''}: ${esc(plural(e.transition_count, 'time'))} in ${esc(plural(e.distinct_run_count, 'run'))}${splits(e) ? `, ${share(e)} of what left ${esc(label(e.from))}` : ''}</title></path>` +
       `<text class="edge-n" x="${lx}" y="${ly}" text-anchor="${anchor}">${esc(count(e.transition_count))}${splits(e) ? ` · ${share(e)}` : ''}</text>`;
   });
   const loops = new Map(links.filter(e => e.from === e.to).map(e => [e.from, e.transition_count]));
@@ -333,13 +342,16 @@ function renderMap(q, data, all = false) {
       `<button type="button" class="link" data-map="all">Show all ${count(graph.edges.length)} links</button></p>`
     : all && graph.edges.length > MAP_LINKS ? `<p class="more">Showing all ${count(graph.edges.length)} links. <button type="button" class="link" data-map="less">Show only the most-taken</button></p>` : '';
   const present = Object.keys(MARK).filter(k => [...marks.values()].some(m => m.kinds.has(k)));
+  const drawnKinds = Object.keys(LINK_KIND).filter(k => links.some(e => e.kind === k && e.from !== e.to && at.has(e.from) && at.has(e.to)));
   q('map').innerHTML = (present.length ? `<p class="legend marks">${present.map(k => `<span><i class="pill ${k}">${esc(MARK[k].badge)}</i>${esc(MARK[k].legend)}</span>`).join('')}` +
     '<span>Select a marked step to see its rows in the table</span></p>' : '') + `<div class="mapscroll"><svg viewBox="0 0 ${width} ${height}" style="min-width:${Math.round(width * MAP_MIN_SCALE)}px" role="img" aria-label="${esc(`Workflow map: ${plural(shown.length, 'step')}${banded ? ` in ${plural(bands.length, 'agent')}` : ''} and ${plural(paths.length, 'link')} across ${plural(graph.run_count, 'run')}`)}">` +
     `<defs><marker id="mapArrow" ${ARROW}><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker>` +
     `<marker id="mapArrowHot" ${ARROW}><path class="arrow hot" d="M0,0 L10,5 L0,10 z"/></marker></defs>` +
     bandRects.join('') + paths.join('') + nodes.join('') + '</svg></div>' + more +
     '<p class="legend kinds"><span><i class="sw llm"></i>LLM call (has a cost)</span><span><i class="sw tool"></i>Tool call</span>' +
-    (hot && total ? `<span><i class="sw hot"></i>Largest share of spend (${Math.round(100 * hot.cost / total)}%)</span>` : '') + '</p>';
+    (hot && total ? `<span><i class="sw hot"></i>Largest share of spend (${Math.round(100 * hot.cost / total)}%)</span>` : '') + '</p>' +
+    (drawnKinds.length ? `<p class="legend links">${drawnKinds.map(k => `<span><svg class="ln${LINK_KIND[k].dashed ? '' : ' solid'}" width="28" height="8" aria-hidden="true"><path d="M0,4 H28"/></svg>${esc(LINK_KIND[k].legend)}</span>`).join('')}</p>` : '') +
+    (drawnKinds.includes('follows') ? `<p class="order-note">${esc(ORDER_NOTE)}</p>` : '');
 
   const name = id => {
     const n = byId.get(id), base = MAP_END[id] || (n?.kind === 'llm_call' ? lines(n).slice(0, 2).join(' ') : label(id));  // whole names, not the box's lines
@@ -357,7 +369,7 @@ function renderMap(q, data, all = false) {
     (graph.edges.some(e => e.fork) ? 'Where one step hands over to more than one agent, "both" means it starts them together and they run side by side (their bands sit next to each other); "either" means each run takes one of the ways; the % is the share of runs reaching that step that take the link. ' : '') +
     (graph.edges.some(e => e.loop) ? 'A return link goes back to an agent that already ran in that run: it gives the share of runs that take it and the average number of passes in those runs. ' : '') : '';
   q('mapWhy').textContent = handoffs + branches +
-    `Arrow width is how many times a hop happened across ${plural(graph.run_count, 'run')}; where a step goes more than one way, the % is that way's share. Links come from the trace: an LLM call choosing a tool, the tool whose result the next LLM call read, the prompt that started a run, and the LLM call that replied. Where a trace doesn't record which LLM call chose a tool or read its result (OpenTelemetry traces often don't), the link is taken from the order the calls ran in within one run.`;
+    `Arrow width is how many times a hop happened across ${plural(graph.run_count, 'run')}; where a step goes more than one way, the % is that way's share. Links come from the trace: an LLM call choosing a tool (“chose”), the tool whose result the next LLM call read (“read the result of”), the prompt that started a run, and the LLM call that replied. Where a trace doesn't record which LLM call chose a tool (OpenTelemetry traces often don't), the link is taken from the order the calls ran in within one run and drawn dashed as “ran next”; it is not a choice.`;
   return marks;
 }
 

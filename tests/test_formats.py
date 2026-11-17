@@ -380,9 +380,10 @@ def test_otel_ids_are_span_ids_in_the_parents_id_space(tmp_path):
     events = [json.loads(line) for line in (tmp_path / "ready" / EVENTS).read_text().splitlines()[1:]]
     llm = next(e for e in events if e["event_type"] == "decision")
     assert next(e for e in events if e.get("parent") == llm["event_id"])["event_type"] == "tool_call"
+    assert "parent_by" not in next(e for e in events if e.get("parent") == llm["event_id"])  # recorded, not step order
 
 
-def test_otel_tools_under_a_skipped_span_link_to_the_llm_call_that_chose_them(tmp_path):
+def test_otel_tools_under_a_skipped_span_link_to_the_llm_call_before_them_by_step_order(tmp_path):
     # every span's parent is an agent/chain span the client skips, as most GenAI instrumentations emit
     path = _write(tmp_path, "spans.json", _otel_rows()[0], document=True)
     prepare([path], tmp_path / "ready", Names(Pseudonymizer(new_key())))
@@ -390,6 +391,8 @@ def test_otel_tools_under_a_skipped_span_link_to_the_llm_call_that_chose_them(tm
     first_llm = next(e for e in events if e["event_type"] == "decision")
     tools = [e for e in events if e["event_type"] == "tool_call"]
     assert len(tools) == 2 and all(t["parent"] == first_llm["event_id"] for t in tools)
+    # the trace records no link: the parent is step order, so the map says "ran next", not "chose"
+    assert all(t["parent_by"] == "order" for t in tools)
     assert all(e["parent"] != first_llm["event_id"] for e in events if e["event_type"] == "decision")
 
 
