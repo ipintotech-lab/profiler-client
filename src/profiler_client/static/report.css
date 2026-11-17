@@ -288,3 +288,5 @@
 .sheet .allfind tr.held td:first-child { padding-left: 8px; }
 @media (max-width: 700px) { .sheet .allfind tr.held td, .sheet .allfind tr.held td:first-child { padding-left: 8px; padding-right: 8px; } }
 .sheet .allfind .readq { margin-top: 6px; color: var(--ink); }
+.sheet .allfind tr.fold .link { min-height: 44px; padding: 0 4px; }  /* "+N smaller findings on the same calls" */
+.sheet .allfind tr.held.sub td:first-child { padding-left: 24px; }  /* folded under the finding above */
