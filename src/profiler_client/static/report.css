@@ -283,3 +283,7 @@
   .sheet .amprint .mapbox svg { min-width: 0 !important; }  /* shrinks to the page, never past it */
   .sheet .amprint .mapbox:has(svg) + p.why { display: none; }  /* said once, under the first map */
 }
+
+.sheet .allfind tr.held td { background: var(--paper); color: var(--ink-2); }
+.sheet .allfind tr.held td:first-child { padding-left: 8px; }
+.sheet .allfind .readq { margin-top: 6px; color: var(--ink); }
