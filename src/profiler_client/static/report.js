@@ -619,28 +619,42 @@ const riskLine = (n, labels) => {
   return `${labels[n.risk] || n.risk}${why.length ? `: ${why.join('; ')}` : ''}.`;
 };
 
-// "All findings": every finding, the ones the headline counts first; a held-out one says why it isn't counted
+// "All findings": every finding, the ones the headline counts first; a held-out one says why it isn't counted.
+// A held finding a counted one covers (covered_by: same calls, saves at least as much) folds under that one,
+// behind a line that opens it; `open` holds the counted rows whose folded findings are shown
 const ALL_SHOWN = 10;
 const HELD = {
   overlap: 'Not in the headline: a larger finding already counts these calls.',
   no_saving: 'No saving counted.',
 };
-function renderAll(q, data, showAll, declare) {
+function renderAll(q, data, showAll, declare, open = new Set()) {
   const rows = data.summary?.findings, labels = data.summary?.risk_labels || {};
   q('allSection').hidden = !Array.isArray(rows) || !rows.length;
   if (q('allSection').hidden) return;
-  const sorted = [...rows.filter(r => r.counted), ...rows.filter(r => !r.counted)];
-  const shown = showAll ? sorted : sorted.slice(0, ALL_SHOWN);
+  const parentOf = r => (r.counted || !rows[r.covered_by]?.counted ? null : r.covered_by);
+  const under = new Map();
+  rows.forEach(r => { const p = parentOf(r); if (p !== null) under.set(p, [...(under.get(p) || []), r]); });
+  const top = [...rows.filter(r => r.counted), ...rows.filter(r => !r.counted && parentOf(r) === null)];
+  const shown = showAll ? top : top.slice(0, ALL_SHOWN);
   // held out until its step is declared read-only: the question, and the host's button or how to answer it
-  const why = r => r.counted ? '' : r.held_out !== 'declaration' ? esc(HELD[r.held_out] || '')
+  const why = r => r.counted ? '' : parentOf(r) !== null ? esc(HELD.overlap) : r.held_out !== 'declaration' ? esc(HELD[r.held_out] || '')
     : `<b>Does this step only read?</b> ${declare ? `<button type="button" class="btn-map" data-declare="${rows.indexOf(r)}">Declare it read-only</button>`
       : 'Not in the headline until you say so: declare it read-only (Tell us about the agent), then analyze again.'}`;
-  q('all').querySelector('tbody').innerHTML = shown.map(r =>
-    `<tr${r.counted ? '' : ' class="held"'}><td><b>${esc(title(r))}</b><span class="note">${(r.nodes || [r.title]).map(stepName).join(' → ')}</span>` +
+  const tr = (r, sub) =>
+    `<tr${r.counted ? '' : ` class="held${sub ? ' sub' : ''}"`}><td><b>${esc(title(r))}</b><span class="note">${(r.nodes || [r.title]).map(stepName).join(' → ')}</span>` +
     `${why(r) ? `<span class="note readq">${why(r)}</span>` : ''}</td><td data-label="Evidence">${esc(evidenceOf(r))}</td>` +
-    `<td data-label="Risk">${esc(labels[r.risk] || r.risk)}</td><td class="num" data-label="In this dataset">${r.saving ? money(r.saving) : '—'}</td></tr>`).join('') +
-    (sorted.length > ALL_SHOWN
-      ? `<tr class="more"><td colspan="4"><button type="button" class="btn-map" data-all="${showAll ? 'fewer' : 'all'}">${showAll ? `Show the first ${ALL_SHOWN}` : `Show all ${count(sorted.length)} findings`}</button></td></tr>` : '');
+    `<td data-label="Risk">${esc(labels[r.risk] || r.risk)}</td><td class="num" data-label="In this dataset">${r.saving ? money(r.saving) : '—'}</td></tr>`;
+  const fold = r => {
+    const i = rows.indexOf(r), kids = under.get(i);
+    if (!kids) return '';
+    const isOpen = open.has(i);
+    return `<tr class="fold"><td colspan="4"><button type="button" class="link" data-covered="${i}" aria-expanded="${isOpen}">` +
+      `${isOpen ? `Hide the ${count(kids.length)} smaller ${kids.length === 1 ? 'finding' : 'findings'}` : `+${count(kids.length)} smaller ${kids.length === 1 ? 'finding' : 'findings'} on the same calls`}</button></td></tr>` +
+      (isOpen ? kids.map(k => tr(k, true)).join('') : '');
+  };
+  q('all').querySelector('tbody').innerHTML = shown.map(r => tr(r) + fold(r)).join('') +
+    (top.length > ALL_SHOWN
+      ? `<tr class="more"><td colspan="4"><button type="button" class="btn-map" data-all="${showAll ? 'fewer' : 'all'}">${showAll ? `Show the first ${ALL_SHOWN}` : `Show all ${count(top.length)} findings`}</button></td></tr>` : '');
 }
 
 // "Do these first": the server's next steps, at most three
@@ -1123,12 +1137,19 @@ function renderReport(root, data, { name = '', meta = [], showEvent = null, decl
     const b = e.target.closest('button[data-steps]');
     if (b) renderSteps(q, data, b.dataset.steps === 'all');
   });
-  renderAll(q, data, false, declareReadOnly);
+  let allShown = false;
+  const allOpen = new Set();
+  renderAll(q, data, allShown, declareReadOnly, allOpen);
   q('all').addEventListener('click', e => {
-    const b = e.target.closest('button[data-all], button[data-declare]');
+    const b = e.target.closest('button[data-all], button[data-declare], button[data-covered]');
     if (!b) return;
-    if (b.dataset.declare) declareReadOnly(data.summary.findings[b.dataset.declare].nodes, data.observe?.selected_workflow ?? null);
-    else renderAll(q, data, b.dataset.all === 'all', declareReadOnly);
+    if (b.dataset.declare) return declareReadOnly(data.summary.findings[b.dataset.declare].nodes, data.observe?.selected_workflow ?? null);
+    if (b.dataset.covered) {
+      const i = Number(b.dataset.covered);
+      if (!allOpen.delete(i)) allOpen.add(i);
+    } else allShown = b.dataset.all === 'all';
+    renderAll(q, data, allShown, declareReadOnly, allOpen);
+    if (b.dataset.covered) q('all').querySelector(`button[data-covered="${b.dataset.covered}"]`)?.focus();
   });
 
   const gaps = gapsOf(data);

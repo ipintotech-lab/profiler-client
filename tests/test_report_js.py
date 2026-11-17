@@ -2,6 +2,7 @@
 step is the same figure, worked out from cost and total cost, on the agent map, the hot spots, the
 details panel and the steps table."""
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -30,14 +31,17 @@ let input = ''; process.stdin.on('data', d => { input += d; }).on('end', () => {
   const declared = [], declareReadOnly = process.argv[2] === 'declare' ? (...args) => declared.push(args) : null;
   window.ProfilerReport.render(root, JSON.parse(input), { name: 'wf', declareReadOnly, workflow: process.argv[3] || null });
   if (process.argv[3]) slots.get('all').on.click({ target: { closest: () => ({ dataset: { declare: '0' } }) } });
+  // CLICK: a button's dataset to click in All findings, after the first draw
+  if (process.env.CLICK) slots.get('all').on.click({ target: { closest: () => ({ dataset: JSON.parse(process.env.CLICK) }) } });
   console.log(JSON.stringify({ ...Object.fromEntries([...slots].map(([k, e]) => [k, text(e)])), declared }));
 });
 """
 
 
-def _render(report: dict, *host: str) -> dict:
+def _render(report: dict, *host: str, click: dict | None = None) -> dict:
+    env = {**os.environ, "CLICK": json.dumps(click)} if click else None
     out = subprocess.run(["node", "-e", HARNESS, str(JS), *host], input=json.dumps(report), capture_output=True,
-                         text=True, check=True)
+                         text=True, check=True, env=env)
     return json.loads(out.stdout)
 
 
@@ -224,9 +228,9 @@ def test_a_tile_says_how_many_of_its_findings_the_headline_counts():
     assert "91 findings<" in _render(report)["risks"]
 
 
-def _finding(title, saving, risk="low", counted=True, held_out=None, observations=12):
+def _finding(title, saving, risk="low", counted=True, held_out=None, observations=12, covered_by=None):
     return {"type": "CACHE_RESULT", "title": title, "nodes": [title], "saving": saving, "observations": observations,
-            "risk": risk, "risk_reasons": [], "counted": counted, "held_out": held_out}
+            "risk": risk, "risk_reasons": [], "counted": counted, "held_out": held_out, "covered_by": covered_by}
 
 
 def test_all_findings_lists_counted_findings_first_and_says_why_others_are_held_out():
@@ -265,3 +269,42 @@ def test_all_findings_shows_ten_then_a_show_all_button_and_is_absent_from_older_
     assert table.count("<tr") == 11 and "Show all 12 findings" in table
     del report["summary"]["findings"]
     assert _render(report).get("all", "") == ""
+
+
+def _covered() -> dict:
+    report = _report()
+    report["summary"].update(risk_labels=LABELS, findings=[
+        _finding("route_bypass", 0.9),
+        _finding("cache_a", 0.2, counted=False, held_out="declaration", covered_by=0),
+        _finding("cache_b", 0.1, counted=False, held_out="overlap", covered_by=0),
+        _finding("fetch_rates", 0.3, counted=False, held_out="declaration"),
+        _finding("no_gain", None, counted=False, held_out="no_saving"),
+    ])
+    return report
+
+
+def test_findings_a_counted_one_covers_fold_under_it_behind_one_line():
+    table = _render(_covered(), "declare")["all"]
+    rows = re.findall(r"<tr[^>]*>.*?</tr>", table)
+    assert len(rows) == 4  # the parent, its fold line, and the two held rows nothing covers
+    assert "route_bypass" in rows[0] and 'class="fold"' in rows[1] and "fetch_rates" in rows[2] and "no_gain" in rows[3]
+    assert '+2 smaller findings on the same calls' in rows[1] and 'aria-expanded="false"' in rows[1]
+    assert "cache_a" not in table and "cache_b" not in table
+    assert 'data-declare="3"' in rows[2]  # an uncovered held row keeps its question
+
+
+def test_the_fold_line_opens_the_covered_findings_under_their_parent():
+    table = _render(_covered(), "declare", click={"covered": "0"})["all"]
+    rows = re.findall(r"<tr[^>]*>.*?</tr>", table)
+    assert [r for r in rows if 'class="held sub"' in r] == rows[2:4]
+    assert "cache_a" in rows[2] and "cache_b" in rows[3] and "Hide the 2 smaller findings" in rows[1]
+    # a covered finding isn't asked about: declaring it would change nothing, the parent already counts its calls
+    assert 'data-declare="1"' not in table and rows[2].count("a larger finding already counts these calls") == 1
+
+
+def test_rows_without_covered_by_are_listed_as_before():
+    report = _covered()
+    for r in report["summary"]["findings"]:
+        del r["covered_by"]
+    table = _render(report)["all"]
+    assert 'class="fold"' not in table and table.count('class="held"') == 4
