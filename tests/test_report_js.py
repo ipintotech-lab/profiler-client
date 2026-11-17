@@ -17,11 +17,11 @@ HARNESS = """
 const el = () => { const kids = new Map(); return { innerHTML: '', textContent: '', hidden: false, dataset: {}, style: {},
   classList: { toggle() {}, add() {}, remove() {} }, addEventListener() {}, setAttribute() {}, kids,
   querySelector: sel => { if (!kids.has(sel)) kids.set(sel, el()); return kids.get(sel); },
-  querySelectorAll: () => [], focus() {}, scrollIntoView() {} }; };
+  querySelectorAll: () => [], focus() {}, scrollIntoView() {}, childNodes: [], append() {} }; };
 const text = e => [e.innerHTML || e.textContent, ...[...e.kids.values()].map(text)].join('');
-const slots = new Map(), root = el();
+const slots = new Map(), root = el(), tools = el();  // .tools: where the host's buttons go
 root.querySelector = sel => { const k = (sel.match(/data-r="?([^"\\]]+)/) || [])[1];
-  if (!k) return null; if (!slots.has(k)) slots.set(k, el()); return slots.get(k); };
+  if (!k) return sel === '.tools' ? tools : null; if (!slots.has(k)) slots.set(k, el()); return slots.get(k); };
 globalThis.window = {};
 globalThis.CSS = { escape: x => x };
 require(process.argv[1]);
@@ -176,3 +176,46 @@ def test_an_agents_llm_turns_are_one_card_and_another_agents_turn_of_the_same_na
     assert "Replace an LLM decision with a rule: 2 LLM turns of" in first
     assert first.count("$5.10") == 1 and "$2.60" in first and "$2.50" in first
     assert "1 LLM turn of" in first
+
+
+LABELS = {"low": "Low observational risk — not replay-verified", "medium": "Needs review", "high": "Investigate first"}
+RISKS = {"low": {"count": 2, "counted": 2, "saving": 3.5}, "medium": {"count": 5, "counted": 0, "saving": 0},
+         "high": {"count": 1, "counted": 0, "saving": 0}}
+
+
+def test_three_risk_tiles_under_the_headline_with_each_risk_named_in_text():
+    report = _report()
+    report["summary"].update(replaceable={"cost": 3.5, "findings": 2}, risk_totals=RISKS, risk_labels=LABELS)
+    tiles = _render(report)["risks"]
+    for text in ("Low risk", LABELS["low"], "$3.50", "2 findings<", "Replay it against past calls",
+                 "Needs review", "No saving counted", "5 findings, none in the headline",
+                 "Investigate first", "1 finding, none in the headline"):
+        assert text in tiles, text
+    # Investigate first is counted, not priced
+    assert tiles.count("No saving counted") == 1 and tiles.index("Investigate first") > tiles.index("No saving counted")
+
+
+def test_the_overview_has_the_datasets_risk_tiles():
+    report = _report()
+    data = {"overview": {"workflows": [{"name": "wf", "runs": 3, "spend": 10.0, "replaceable": 3.5, "findings": 2,
+                                        "highest_risk": "high"}],
+                         "totals": {"spend": 10.0, "replaceable": 3.5, "share": 0.35, "findings": 2},
+                         "risk_totals": RISKS, "risk_labels": LABELS},
+            "reports": {"wf": report}}
+    tiles = _render(data)["risks"]
+    assert "$3.50" in tiles and "Investigate first" in tiles
+
+
+def test_a_report_without_risk_totals_has_no_tiles():
+    # reports made before the server sent risk_totals, and diagnose mode
+    assert _render(_report()).get("risks", "") == ""
+
+
+def test_a_tile_says_how_many_of_its_findings_the_headline_counts():
+    report = _report()
+    risks = {**RISKS, "medium": {"count": 91, "counted": 13, "saving": 6.97}}
+    report["summary"].update(risk_totals=risks, risk_labels=LABELS)
+    assert "91 findings, 13 in the headline" in _render(report)["risks"]
+    # a result from before the counted figure: the count alone
+    report["summary"]["risk_totals"] = {r: {"count": t["count"], "saving": t["saving"]} for r, t in risks.items()}
+    assert "91 findings<" in _render(report)["risks"]

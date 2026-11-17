@@ -113,6 +113,15 @@
 .sheet .lead .head { font-size: 22px; line-height: 1.35; font-weight: 600; letter-spacing: -.01em; max-width: 46ch; }
 .sheet .lead .head b { font-weight: 800; }
 .sheet .lead .sub { font-size: 15px; color: var(--ink-2); margin-top: 4px; max-width: 70ch; }
+.sheet .risks { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.sheet .risks .tile { border: 1px solid var(--rule); border-left: 4px solid var(--carbon); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; font-size: 15px; break-inside: avoid; }
+.sheet .risks .tile[data-risk="medium"] { border-left-color: var(--estimate); }
+.sheet .risks .tile[data-risk="high"] { border-left-color: var(--bad); }
+.sheet .risks h4 { margin: 0; font-size: 16px; }
+.sheet .risks .fig { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sheet .risks .fig .k { font-size: 13px; font-weight: 400; }
+.sheet .risks .k { color: var(--ink-2); font-size: 13px; }
+.sheet .risks + .notes { margin-top: 12px; }
 .sheet .lead + .notes { margin-top: 8px; }
 .sheet .lead:not([hidden]) ~ .totals { font-size: 16px; font-weight: 400; margin-top: 12px; }
 

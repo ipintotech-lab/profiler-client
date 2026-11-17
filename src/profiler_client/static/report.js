@@ -467,6 +467,7 @@ const SHEET = HEAD + `
     <p class="head" data-r="head"></p>
     <p class="sub" data-r="sub"></p>
   </div>
+  <ul class="risks" data-r="risks" hidden aria-label="Findings by risk"></ul>
   <p class="notes" data-r="notes"></p>
   <p class="totals" data-r="totals"></p>
   <p class="scope" data-r="scope" hidden></p>
@@ -580,6 +581,28 @@ function renderLead(q, data) {
     q('head').innerHTML = `<b>${share(r.cost, cost)}</b> of this workflow’s spend went to calls ${what}.`;
     q('sub').textContent = `${money(r.cost)} of ${money(cost)} in this dataset, ${found}.`;
   }
+}
+
+// three tiles under the headline, one per risk, each with its label in text (never color alone). The
+// savings are the headline's findings only, so they add up to it; a high-risk finding is counted, not priced.
+const RISK_TILES = [
+  ['low', 'Low risk', 'Replay it against past calls before you change anything.'],
+  ['medium', null, 'Check the reasons against the agent’s code first.'],
+  ['high', null, 'Find the cause before changing this step.'],
+];
+// findings that overlap one counted in the headline are listed, not counted again, so a tile can list more
+// findings than the headline counts; say how many it counts (older results have no counted figure)
+const inHeadline = t => t.counted == null || t.counted === t.count ? '' : `, ${t.counted ? count(t.counted) : 'none'} in the headline`;
+function renderRisks(q, totals, labels = {}) {
+  q('risks').hidden = !totals;
+  if (!totals) return;
+  q('risks').innerHTML = RISK_TILES.map(([risk, name, act]) => {
+    const t = totals[risk] || { count: 0, saving: 0 };
+    const figure = risk === 'high' ? '' : `<p class="fig">${t.saving ? `${money(t.saving)} <span class="k">in this dataset</span>` : 'No saving counted'}</p>`;
+    return `<li class="tile" data-risk="${risk}"><h4>${esc(name || labels[risk] || risk)}</h4>` +
+      (name && labels[risk] ? `<p class="k">${esc(labels[risk])}</p>` : '') +
+      `${figure}<p>${plural(t.count, 'finding')}${inHeadline(t)}</p>${t.count ? `<p class="k">${esc(act)}</p>` : ''}</li>`;
+  }).join('');
 }
 
 // the risk label, then the reasons the evidence line doesn't already give (those quote the call count)
@@ -1035,6 +1058,7 @@ function renderReport(root, data, { name = '', meta = [], showEvent = null } = {
     renderFirst(q, data, new Set([...q('map').querySelectorAll('g[data-node]')].map(g => g.dataset.node)));
   };
   renderLead(q, data);
+  renderRisks(q, data.summary?.risk_totals, data.summary?.risk_labels);
   renderBetween(q, data);
   q('map').addEventListener('click', e => {
     const b = e.target.closest('button[data-map]');
@@ -1077,6 +1101,7 @@ const OVERVIEW = HEAD + `
     <p class="head" data-r="head"></p>
     <p class="sub" data-r="sub"></p>
   </div>
+  <ul class="risks" data-r="risks" hidden aria-label="Findings by risk"></ul>
   <p class="totals" data-r="totals"></p>
   <section>
     <h3>Which workflows matter</h3>
@@ -1139,6 +1164,7 @@ function renderOverview(root, data, { name = '', meta = [], showEvent = null, wo
     const q = k => root.querySelector(`[data-r="${k}"]`);
     renderHead(q, data.grade, name, meta);
     renderOverviewLead(q, o);
+    renderRisks(q, o.risk_totals, o.risk_labels);
     const runs = (o.workflows || []).reduce((n, r) => n + (r.runs || 0), 0);
     q('totals').innerHTML = `${money(o.totals?.spend)} <span class="k">across</span> ${plural(runs, 'run')} <span class="k">in</span> ${plural((o.workflows || []).length, 'workflow')}.`;
     renderOverviewRows(q, o, data.reports);
