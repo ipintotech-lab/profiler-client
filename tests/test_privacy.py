@@ -217,6 +217,23 @@ def test_open_draws_the_report_with_the_shared_renderer(tmp_path, monkeypatch):
     assert rendered.count("</script>") == 3  # the data, the renderer and the call: nothing from the report
 
 
+def test_open_marks_the_page_restored_only_when_a_name_was_matched(tmp_path, monkeypatch):
+    # the header chip "Names restored on this machine only" shows only when open put a real name back
+    payload_hash, token = "e" * 64, "h:" + "9" * 64
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    write_name_list(payload_hash, {token: "fraud-screening"}, tmp_path / "profiler-client" / "names")
+    def page(report):
+        source, output = tmp_path / "report.json", tmp_path / "report.html"
+        source.write_text(json.dumps(report))
+        assert cli.main(["open", str(source), "-o", str(output)]) == 0
+        text = output.read_text()
+        start = text.index('id="report-data">') + len('id="report-data">')
+        return json.loads(text[start:text.index("</script>", start)])
+    graph = {"run_count": 1, "edges": [], "nodes": [{"id": token, "kind": "step", "occurrences": 1, "cost": 0}]}
+    assert page({"payload_sha256": payload_hash, "graph": graph})["restored"] is True
+    assert page({"payload_sha256": "f" * 64, "graph": graph})["restored"] is False
+
+
 def test_open_never_writes_a_findings_restored_inputs(tmp_path, monkeypatch):
     # a finding lists the inputs it matched; their pseudonyms are in the name list
     # (short event-log field values), but the page draws no input, so none is written
