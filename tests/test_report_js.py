@@ -26,14 +26,15 @@ globalThis.window = {};
 globalThis.CSS = { escape: x => x };
 require(process.argv[1]);
 let input = ''; process.stdin.on('data', d => { input += d; }).on('end', () => {
-  window.ProfilerReport.render(root, JSON.parse(input), { name: 'wf' });
+  const declareReadOnly = process.argv[2] === 'declare' ? () => {} : null;  // a host that takes declarations
+  window.ProfilerReport.render(root, JSON.parse(input), { name: 'wf', declareReadOnly });
   console.log(JSON.stringify(Object.fromEntries([...slots].map(([k, e]) => [k, text(e)]))));
 });
 """
 
 
-def _render(report: dict) -> dict:
-    out = subprocess.run(["node", "-e", HARNESS, str(JS)], input=json.dumps(report), capture_output=True,
+def _render(report: dict, *host: str) -> dict:
+    out = subprocess.run(["node", "-e", HARNESS, str(JS), *host], input=json.dumps(report), capture_output=True,
                          text=True, check=True)
     return json.loads(out.stdout)
 
@@ -219,3 +220,34 @@ def test_a_tile_says_how_many_of_its_findings_the_headline_counts():
     # a result from before the counted figure: the count alone
     report["summary"]["risk_totals"] = {r: {"count": t["count"], "saving": t["saving"]} for r, t in risks.items()}
     assert "91 findings<" in _render(report)["risks"]
+
+
+def _finding(title, saving, risk="low", counted=True, held_out=None, observations=12):
+    return {"type": "CACHE_RESULT", "title": title, "nodes": [title], "saving": saving, "observations": observations,
+            "risk": risk, "risk_reasons": [], "counted": counted, "held_out": held_out}
+
+
+def test_all_findings_lists_counted_findings_first_and_says_why_others_are_held_out():
+    report = _report()
+    report["summary"].update(risk_labels=LABELS, findings=[
+        _finding("fetch_rates", 2.0, held_out="declaration", counted=False),
+        _finding("kyc_lookup", 1.5),
+        _finding("lookup_again", 0.5, "medium", counted=False, held_out="overlap"),
+    ])
+    table = _render(report)["all"]
+    assert table.index("kyc_lookup") < table.index("fetch_rates") < table.index("lookup_again")
+    assert table.count('class="held"') == 2 and "$1.50" in table and "$2.00" in table
+    assert "Does this step only read?</b> Not in the headline until you say so: declare it read-only" in table
+    assert "a larger finding already counts" in table and "Needs review" in table
+    # a host that takes declarations gets a button instead
+    hosted = _render(report, "declare")["all"]
+    assert 'data-declare="0"' in hosted and "until you say so" not in hosted
+
+
+def test_all_findings_shows_ten_then_a_show_all_button_and_is_absent_from_older_results():
+    report = _report()
+    report["summary"].update(risk_labels=LABELS, findings=[_finding(f"step_{i}", 1.0 + i) for i in range(12)])
+    table = _render(report)["all"]
+    assert table.count("<tr") == 11 and "Show all 12 findings" in table
+    del report["summary"]["findings"]
+    assert _render(report).get("all", "") == ""

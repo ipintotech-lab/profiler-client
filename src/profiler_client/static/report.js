@@ -504,6 +504,14 @@ const SHEET = HEAD + `
     <p class="why">Calls more than one agent makes in the same run, with the same input and the same result. One fetch could serve them all.</p>
     <div data-r="between"></div>
   </section>
+  <section class="allfind" data-r="allSection" hidden>
+    <h3>All findings</h3>
+    <table class="tbl" data-r="all">
+      <thead><tr><th>What to change</th><th>Evidence</th><th>Risk</th><th class="num">In this dataset</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="why">Most saving first. Greyed rows aren’t in the headline: each says why.</p>
+  </section>
   <section>
     <h3>Where the money went</h3>
     <p class="keys" aria-hidden="true"><span class="key"><b></b>Spend</span><span class="key"><b class="rep"></b>Spent on repeats</span></p>
@@ -610,6 +618,30 @@ const riskLine = (n, labels) => {
   const why = (n.risk_reasons || []).filter(r => !new RegExp(`\\b${n.observations}\\b`).test(r));
   return `${labels[n.risk] || n.risk}${why.length ? `: ${why.join('; ')}` : ''}.`;
 };
+
+// "All findings": every finding, the ones the headline counts first; a held-out one says why it isn't counted
+const ALL_SHOWN = 10;
+const HELD = {
+  overlap: 'Not in the headline: a larger finding already counts these calls.',
+  no_saving: 'No saving counted.',
+};
+function renderAll(q, data, showAll, declare) {
+  const rows = data.summary?.findings, labels = data.summary?.risk_labels || {};
+  q('allSection').hidden = !Array.isArray(rows) || !rows.length;
+  if (q('allSection').hidden) return;
+  const sorted = [...rows.filter(r => r.counted), ...rows.filter(r => !r.counted)];
+  const shown = showAll ? sorted : sorted.slice(0, ALL_SHOWN);
+  // held out until its step is declared read-only: the question, and the host's button or how to answer it
+  const why = r => r.counted ? '' : r.held_out !== 'declaration' ? esc(HELD[r.held_out] || '')
+    : `<b>Does this step only read?</b> ${declare ? `<button type="button" class="btn-map" data-declare="${rows.indexOf(r)}">Declare it read-only</button>`
+      : 'Not in the headline until you say so: declare it read-only (Tell us about the agent), then analyze again.'}`;
+  q('all').querySelector('tbody').innerHTML = shown.map(r =>
+    `<tr${r.counted ? '' : ' class="held"'}><td><b>${esc(title(r))}</b><span class="note">${(r.nodes || [r.title]).map(stepName).join(' → ')}</span>` +
+    `${why(r) ? `<span class="note readq">${why(r)}</span>` : ''}</td><td data-label="Evidence">${esc(evidenceOf(r))}</td>` +
+    `<td data-label="Risk">${esc(labels[r.risk] || r.risk)}</td><td class="num" data-label="In this dataset">${r.saving ? money(r.saving) : '—'}</td></tr>`).join('') +
+    (sorted.length > ALL_SHOWN
+      ? `<tr class="more"><td colspan="4"><button type="button" class="btn-map" data-all="${showAll ? 'fewer' : 'all'}">${showAll ? `Show the first ${ALL_SHOWN}` : `Show all ${count(sorted.length)} findings`}</button></td></tr>` : '');
+}
 
 // "Do these first": the server's next steps, at most three
 function renderFirst(q, data, onMap) {
@@ -1032,7 +1064,9 @@ function renderHead(q, g, name, meta) {
   if (g) { q('grade').dataset.g = g.grade; q('gradeLetter').textContent = g.grade; q('grade').setAttribute('aria-label', `Dataset grade ${g.grade}`); }
 }
 
-function renderReport(root, data, { name = '', meta = [], showEvent = null } = {}) {
+// With `declareReadOnly` (steps => void), a finding held out until its step is declared read-only gets a
+// button that hands the host its steps; without it the row says how to declare them.
+function renderReport(root, data, { name = '', meta = [], showEvent = null, declareReadOnly = null } = {}) {
   root.innerHTML = SHEET;
   const q = k => root.querySelector(`[data-r="${k}"]`);
   const sm = data.summary || {}, t = sm.totals || {}, g = data.grade;
@@ -1088,6 +1122,13 @@ function renderReport(root, data, { name = '', meta = [], showEvent = null } = {
   q('steps').addEventListener('click', e => {
     const b = e.target.closest('button[data-steps]');
     if (b) renderSteps(q, data, b.dataset.steps === 'all');
+  });
+  renderAll(q, data, false, declareReadOnly);
+  q('all').addEventListener('click', e => {
+    const b = e.target.closest('button[data-all], button[data-declare]');
+    if (!b) return;
+    if (b.dataset.declare) declareReadOnly(data.summary.findings[b.dataset.declare].nodes);
+    else renderAll(q, data, b.dataset.all === 'all', declareReadOnly);
   });
 
   const gaps = gapsOf(data);

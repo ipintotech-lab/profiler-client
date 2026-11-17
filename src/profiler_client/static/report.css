@@ -136,12 +136,12 @@
 .sheet .card h5 { margin: 12px 0 0; font-size: 15px; }
 .sheet .card .where { font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
 .sheet .card .risk, .sheet .card .do { color: var(--ink-2); }
-.sheet .card .btn-map { margin-top: auto; align-self: flex-start; min-height: 44px; padding: 8px 14px; background: transparent; color: var(--carbon); border: 0; box-shadow: inset 0 0 0 1.5px var(--carbon); border-radius: 6px; font: 600 14px/1.2 var(--sans); cursor: pointer; }
-.sheet .card .btn-map:hover { background: var(--pseudo); }
+.sheet .card .btn-map, .sheet .allfind .btn-map { margin-top: auto; align-self: flex-start; min-height: 44px; padding: 8px 14px; background: transparent; color: var(--carbon); border: 0; box-shadow: inset 0 0 0 1.5px var(--carbon); border-radius: 6px; font: 600 14px/1.2 var(--sans); cursor: pointer; }
+.sheet .card .btn-map:hover, .sheet .allfind .btn-map:hover { background: var(--pseudo); }
 .sheet section.between .why { margin-top: 4px; }
 .sheet section.first .nothing { color: var(--ink-2); max-width: 70ch; margin-top: 8px; }
 .sheet .tbl tr.hl td { background: var(--estimate-bg); }
-@media print { .sheet .card .btn-map, .sheet .mapbox .more .link { display: none; } }
+@media print { .sheet .card .btn-map, .sheet .allfind .btn-map, .sheet .mapbox .more .link { display: none; } }
 
 /* where the money went */
 .sheet .keys { margin-top: 12px; font-size: 14px; color: var(--ink-2); }
@@ -283,3 +283,8 @@
   .sheet .amprint .mapbox svg { min-width: 0 !important; }  /* shrinks to the page, never past it */
   .sheet .amprint .mapbox:has(svg) + p.why { display: none; }  /* said once, under the first map */
 }
+
+.sheet .allfind tr.held td { background: var(--paper); color: var(--ink-2); }
+.sheet .allfind tr.held td:first-child { padding-left: 8px; }
+@media (max-width: 700px) { .sheet .allfind tr.held td, .sheet .allfind tr.held td:first-child { padding-left: 8px; padding-right: 8px; } }
+.sheet .allfind .readq { margin-top: 6px; color: var(--ink); }
