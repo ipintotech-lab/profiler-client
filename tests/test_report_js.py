@@ -9,6 +9,7 @@ from pathlib import Path
 
 from test_graph import _agent_ev, _decision, _ev
 
+from profiler_client.contract import TraceEvent
 from profiler_client.graph import build_graph
 
 JS = Path(__file__).parent.parent / "src" / "profiler_client" / "static" / "report.js"
@@ -349,3 +350,29 @@ def test_the_capacity_view_splits_a_multi_agent_workflow_by_agent():
 
 def test_a_result_without_a_capacity_solve_has_no_capacity_view():
     assert _render(_report())["capBody"] == ""
+
+
+def _linked_report(parent_by):
+    def llm(run, eid, trigger):
+        return TraceEvent(trace_id="t", run_id=run, workflow="wf", agent="a", event_type="decision", model="m",
+                          node=f"llm_call ← {trigger}", event_id=eid, trigger=trigger, cost=1.0)
+    events = []
+    for run in ("r1", "r2"):
+        tool = _ev(run, f"{run}t", "search", f"{run}l1").model_copy(update={"parent_by": parent_by})
+        events += [llm(run, f"{run}l1", "user_prompt"), tool, llm(run, f"{run}l2", "search")]
+    return {"availability": {"graph": {"available": True}}, "graph": build_graph(events, "wf", "invokes")["graph"],
+            "summary": {"totals": {"cost": 4.0, "runs": 2}, "opportunities": [], "next_steps": []}, "mine": {"by_agent": {}}}
+
+
+def test_a_link_from_step_order_is_dashed_ran_next_with_the_step_order_line_and_never_chose():
+    page = _render(_linked_report("order"))
+    assert 'class="edge k-follows' in page["map"] and "(ran next)" in page["map"]
+    assert "ran next: taken from the order steps ran in" in page["map"] and "read the result of: " in page["map"]
+    assert "Built from step order within each run. Steps that ran in parallel may appear in sequence." in page["map"]
+    assert "chose" not in page["map"]
+
+
+def test_a_recorded_link_is_chose_and_the_map_has_no_step_order_line():
+    page = _render(_linked_report(None))["map"]
+    assert "(chose)" in page and "chose: the trace records" in page
+    assert "ran next" not in page and "Built from step order" not in page

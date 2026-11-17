@@ -112,6 +112,9 @@ def check_event(event: dict, kept: frozenset[str] = frozenset()) -> list[str]:
                 isinstance(v, int) and not isinstance(v, bool) for v in value.values())
             if not ok:
                 problems.append(key)
+        elif key == "parent_by":
+            if value != "order":  # one fixed word, never data
+                problems.append(key)
         elif key == "cache_ttl_seconds":
             if not isinstance(value, int) or isinstance(value, bool):
                 problems.append(key)

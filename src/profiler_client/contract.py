@@ -3,6 +3,8 @@ server reads. It matches the server's ``TraceEvent`` field for field, so
 a prepared dataset is accepted by today's ``/analyze`` unchanged."""
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 CONTRACT_VERSION = "2"
@@ -43,6 +45,10 @@ class TraceEvent(_Strict):
     # the event's own id (v2), in the same id space as ``parent``
     event_id: str | None = None
     parent: str | None = None
+    # "order": ``parent`` was taken from the order the calls ran in, not
+    # recorded by the trace (an OpenTelemetry tool span under a skipped span).
+    # The map draws it as "ran next", never as a choice. None = recorded.
+    parent_by: Literal["order"] | None = None
     input_state: dict = Field(default_factory=dict)
     decision: Decision | None = None
     tool: Tool | None = None

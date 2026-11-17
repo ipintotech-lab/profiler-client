@@ -252,6 +252,10 @@
 .sheet .mapbox .sw.dash { border: 2px dashed var(--bad); background: var(--sheet); }
 .sheet .mapbox svg.ln { display: inline; width: 28px; height: 8px; vertical-align: middle; margin-right: 6px; }
 .sheet .mapbox .ln path { stroke: var(--edge); stroke-width: 2; stroke-dasharray: 7 5; }
+.sheet .mapbox .ln.solid path { stroke-dasharray: none; }
+.sheet .mapbox .edge.k-follows { stroke-dasharray: 10 8; }
+.sheet .mapbox .legend.links { margin-top: 6px; }
+.sheet .mapbox .order-note { margin: 6px 0 0; font-size: 14px; color: var(--ink-2); }
 .sheet .hotspots h4 { margin: 0 0 8px; font-size: 15px; }
 .sheet .hotspots ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .sheet .hotspots button { display: grid; grid-template-columns: 24px 1fr; gap: 2px 8px; width: 100%; min-height: 44px; padding: 8px 10px; text-align: left; background: var(--sheet); border: 1.5px solid var(--rule); border-radius: 6px; font: 14px/1.3 var(--sans); color: var(--ink); cursor: pointer; }

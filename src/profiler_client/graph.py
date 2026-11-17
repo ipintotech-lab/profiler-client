@@ -13,7 +13,8 @@ order: its ``trigger`` names the step whose result it read (or
 call handed it that prompt, which the handoff already draws), and with "invokes"
 links an LLM call that started no step ended its run (drawn to a "reply"
 end node). Each edge says its ``kind``: "invokes" (or "linked" for other
-relations), "reads_result", "starts" or "ends".
+relations; "follows" when every event on it has ``parent_by="order"``, a
+parent taken from step order), "reads_result", "starts" or "ends".
 
 A node is a step of one agent. A step used by more than one agent is one
 node per agent, with the id ``"<step> @ <agent>"`` and the step in
@@ -126,7 +127,9 @@ def build_graph(events: list[TraceEvent], workflow: str, relation: str | None) -
     if not links:
         return {"availability": {"available": False, "code": "NO_PARENT_LINKS"}}
     parent_links = set(links)
-    kinds = dict.fromkeys(links, "invokes" if relation == "invokes" else "linked")
+    recorded = "invokes" if relation == "invokes" else "linked"
+    # a link the trace didn't record, only the order the calls ran in, is "follows"
+    kinds = {k: "follows" if all(c.parent_by == "order" for c in v) else recorded for k, v in links.items()}
 
     def add(source: str, target: str, kind: str, event: TraceEvent) -> None:
         kinds.setdefault((source, target), kind)

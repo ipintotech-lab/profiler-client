@@ -34,6 +34,15 @@ def test_event_order_alone_draws_no_edge():
     assert build_graph(events, "wf", "invokes")["availability"] == {"available": False, "code": "NO_PARENT_LINKS"}
 
 
+def test_a_parent_taken_from_step_order_is_a_follows_link_unless_a_recorded_one_shares_it():
+    def ordered(run, eid, node, parent):
+        return _ev(run, eid, node, parent).model_copy(update={"parent_by": "order"})
+    events = [_ev("r1", "l1", "llm", cost=1.0), ordered("r1", "t1", "A", "l1"), ordered("r1", "t2", "B", "l1"),
+              _ev("r2", "l2", "llm", cost=1.0), _ev("r2", "t3", "B", "l2")]
+    kinds = {(e["from"], e["to"]): e["kind"] for e in build_graph(events, "wf", "invokes")["graph"]["edges"]}
+    assert kinds == {("llm", "A"): "follows", ("llm", "B"): "invokes"}
+
+
 def test_contract_v1_data_has_no_graph():
     events = [_ev("r1", None, "llm"), _ev("r1", None, "A", "m1")]
     assert build_graph(events, "wf", None) == {"availability": {"available": False, "code": "NO_EVENT_IDS"}}
