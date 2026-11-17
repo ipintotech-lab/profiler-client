@@ -308,3 +308,44 @@ def test_rows_without_covered_by_are_listed_as_before():
         del r["covered_by"]
     table = _render(report)["all"]
     assert 'class="fold"' not in table and table.count('class="held"') == 4
+
+
+def _capacity(report: dict, by_agent=None) -> dict:
+    report["profile"] = {"x": {"x": 4.0}, "y": {"y": 4.0}, "by_agent": by_agent, "sensitivity": [
+        {"ratio": 1.0, "x": {"x": -0.0}}, {"ratio": 1.5, "x": {"x": 4.0}}, {"ratio": 2.0, "x": {"x": 4.0}}]}
+    report["formula"] = {"used": {"demand_model": "p95", "unit_cost": 0.01, "unit_value": 0.02, "capacity_headroom": 2.0},
+                         "defaults": {"usage_stats": {"count": 30, "p50": 3.0, "max": 6.0}, "provenance": {
+                             "unit_cost": {"label": "DERIVED", "note": "x"}, "unit_value": {"label": "ASSUMED", "note": "x"},
+                             "capacity_headroom": {"label": "ASSUMED", "note": "x"}, "max_demand": {"label": "DERIVED", "note": "x"}}}}
+    return report
+
+
+def test_each_workflow_has_a_capacity_view_from_its_own_pipeline_result():
+    body = _render(_capacity(_report()))["capBody"]
+    assert "<b>4 calls</b> per run" in body and "p95 of 30 runs (median 3 calls, most 6 calls)" in body
+    assert "doesn’t change any finding" in body
+
+
+def test_the_capacity_inputs_say_in_plain_words_which_come_from_the_traces():
+    body = _render(_capacity(_report()))["capBody"]
+    assert '<td>Cost of a call</td><td data-label="Source">From your traces</td>' in body
+    assert '<td>Value of a used call</td><td data-label="Source">Assumed</td><td data-label="How">Traces can’t show it, so it is set to 2× the cost of a call.' in body
+    assert "At most 2× the peak" in body and "p95 of calls per run across 30 runs" in body
+    assert "unit_cost" not in body and "--" not in body  # the server's notes for developers stay out
+
+
+def test_capacity_sizes_that_repeat_are_merged_into_one_row():
+    body = _render(_capacity(_report()))["capBody"]
+    assert "1× its cost</td><td class=\"num\" data-label=\"Size for\">None, not worth providing" in body  # the solve's -0
+    assert "1.5× to 2× its cost</td><td class=\"num\" data-label=\"Size for\">4 calls" in body and body.count("its cost</td>") == 2
+
+
+def test_the_capacity_view_splits_a_multi_agent_workflow_by_agent():
+    by_agent = {"mode": "multi_agent", "agents": [{"agent": "kyc", "demand": 3.0, "x": 3.0},
+                                                  {"agent": "sup", "demand": 5.0, "x": 5.0}]}
+    body = _render(_capacity(_report(), by_agent))["capBody"]
+    assert "Peak calls per run" in body and "kyc" in body and "5 calls" in body
+
+
+def test_a_result_without_a_capacity_solve_has_no_capacity_view():
+    assert _render(_report())["capBody"] == ""

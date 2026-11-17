@@ -290,3 +290,7 @@
 .sheet .allfind .readq { margin-top: 6px; color: var(--ink); }
 .sheet .allfind tr.fold .link { min-height: 44px; padding: 0 4px; }  /* "+N smaller findings on the same calls" */
 .sheet .allfind tr.held.sub td:first-child { padding-left: 24px; }  /* folded under the finding above */
+/* the capacity view: closed under the map until the reader opens it */
+.sheet details.capacity { margin-top:16px }
+.sheet details.capacity > summary { cursor:pointer; color:var(--carbon); text-decoration:underline; text-underline-offset:3px; min-height:44px; display:flex; align-items:center }
+.sheet details.capacity .tbl { margin:8px 0 }
