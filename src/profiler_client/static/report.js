@@ -469,7 +469,8 @@ const HEAD = `
   <div class="sheet-head">
     <div class="title">
       <div class="grade mini" data-r="grade" hidden><b data-r="gradeLetter"></b></div>
-      <div><h2 data-r="name" tabindex="-1"></h2><div class="when" data-r="meta"></div></div>
+      <div><h2 data-r="name" tabindex="-1"></h2><div class="when" data-r="meta"></div>
+        <span class="restored" data-r="restored" hidden>Names restored on this machine only</span></div>
     </div>
     <div class="tools"></div>
   </div>`;
@@ -1087,7 +1088,9 @@ function wireAgentMap(q, data, m, showEvent) {
   return select;
 }
 
-function renderHead(q, g, name, meta) {
+// `restored`: the host put the reader's own names back on this machine (profiler-client `open`); the server never does
+function renderHead(q, g, name, meta, restored = false) {
+  q('restored').hidden = !restored;
   q('name').textContent = plainName(name);  // a pseudonym shows as its first 7 characters
   q('meta').textContent = [...meta, g && `dataset grade ${g.grade} (${String(g.word || '').toLowerCase()})`].filter(Boolean).join(' · ');
   q('grade').hidden = !g;
@@ -1138,11 +1141,11 @@ function renderCapacity(q, data) {
       <table class="tbl"><thead><tr><th>If a used call is worth</th><th class="num">Size for</th></tr></thead><tbody>${sens}</tbody></table>` : ''}`;
 }
 
-function renderReport(root, data, { name = '', meta = [], showEvent = null, declareReadOnly = null } = {}) {
+function renderReport(root, data, { name = '', meta = [], showEvent = null, declareReadOnly = null, restored = false } = {}) {
   root.innerHTML = SHEET;
   const q = k => root.querySelector(`[data-r="${k}"]`);
   const sm = data.summary || {}, t = sm.totals || {}, g = data.grade;
-  renderHead(q, g, name, meta);
+  renderHead(q, g, name, meta, restored);
   // the map, its wiring and the cards that point at it, drawn again when the reader shows all links or fewer
   DISPLAY = new Map();
   const am = data.availability?.graph?.available && data.graph?.agent_graph?.layout ? agentMapModel(data) : null;
@@ -1268,7 +1271,7 @@ function renderOverviewRows(q, o, reports) {
       <td data-label="Findings">${count(r.findings)}${r.highest_risk ? `<span class="note">${esc(labels[r.highest_risk] || r.highest_risk)}</span>` : ''}</td></tr>`).join('');
 }
 
-function renderOverview(root, data, { name = '', meta = [], showEvent = null, declareReadOnly = null, workflow = null } = {}) {
+function renderOverview(root, data, { name = '', meta = [], showEvent = null, declareReadOnly = null, workflow = null, restored = false } = {}) {
   const o = data.overview;
   // redraw `root`, keeping what the host added: its buttons in .tools and anything after the sheet
   let own = new Set();
@@ -1283,7 +1286,7 @@ function renderOverview(root, data, { name = '', meta = [], showEvent = null, de
   const overview = (from = null) => redraw(() => {
     root.innerHTML = OVERVIEW;
     const q = k => root.querySelector(`[data-r="${k}"]`);
-    renderHead(q, data.grade, name, meta);
+    renderHead(q, data.grade, name, meta, restored);
     renderOverviewLead(q, o);
     renderRisks(q, o.risk_totals, o.risk_labels);
     const runs = (o.workflows || []).reduce((n, r) => n + (r.runs || 0), 0);
@@ -1298,7 +1301,7 @@ function renderOverview(root, data, { name = '', meta = [], showEvent = null, de
   const show = wf => {
     if (!data.reports[wf]) return;
     redraw(() => {
-      renderReport(root, data.reports[wf], { name: wf, meta: [plainName(name), ...meta].filter(Boolean), showEvent, declareReadOnly });
+      renderReport(root, data.reports[wf], { name: wf, meta: [plainName(name), ...meta].filter(Boolean), showEvent, declareReadOnly, restored });
       const back = root.querySelector('[data-r="back"]');
       back.hidden = false;
       back.addEventListener('click', () => overview(wf));

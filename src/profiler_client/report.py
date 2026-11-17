@@ -203,7 +203,7 @@ def render_html(report: dict, title: str, restored: int | None = None, unmatched
     # be honest in the header about how much was restored: with nothing matched,
     # don't claim "your own names" -- the page is still pseudonymized
     if restored:
-        meta = ["Opened on your machine with your own names"]
+        meta = ["Opened on your machine"]  # the header's chip says the names are restored
         if unmatched:
             meta.append(f"{unmatched:,} pseudonym{'' if unmatched == 1 else 's'} not matched")
     elif unmatched:
@@ -226,7 +226,7 @@ def render_html(report: dict, title: str, restored: int | None = None, unmatched
 <body><main>
 <article class="sheet" id="report"><noscript>This report is drawn by a script in this file. Allow scripts for this local page to see it.</noscript></article>
 </main>
-<script type="application/json" id="report-data">{_script_json({"report": view(report), "name": title, "meta": meta, "source": source})}</script>
+<script type="application/json" id="report-data">{_script_json({"report": view(report), "name": title, "meta": meta, "source": source, "restored": bool(restored)})}</script>
 <script>
 {js}
 </script>
@@ -234,7 +234,7 @@ def render_html(report: dict, title: str, restored: int | None = None, unmatched
 (function () {{
   const page = JSON.parse(document.getElementById('report-data').textContent);
   const root = document.getElementById('report');
-  ProfilerReport.render(root, page.report, {{ name: page.name, meta: page.meta, showEvent: page.source }});
+  ProfilerReport.render(root, page.report, {{ name: page.name, meta: page.meta, showEvent: page.source, restored: page.restored }});
   const print = document.createElement('button');
   print.className = 'btn';
   print.type = 'button';
