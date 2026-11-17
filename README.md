@@ -133,8 +133,9 @@ manifest.
 Each event has its own id (`event_id`, a pseudonym of the message, tool call
 or span id) in the same id space as its `parent`, so the profiler can draw
 which step started which. A tool call's parent is the LLM call that chose it,
-or its enclosing span in OpenTelemetry
-(`parent_relation: invokes`). For your
+or its enclosing span in OpenTelemetry, or the LLM call whose output names
+the tool span's call id (`gen_ai.tool.call.id`; the ids themselves are never
+written) (`parent_relation: invokes`). For your
 own event log the client can't know what `parent` means, so it says
 `unspecified`.
 
