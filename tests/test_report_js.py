@@ -15,7 +15,7 @@ JS = Path(__file__).parent.parent / "src" / "profiler_client" / "static" / "repo
 # a page with no browser: each [data-r] slot keeps what the report writes into it
 HARNESS = """
 const el = () => { const kids = new Map(); return { innerHTML: '', textContent: '', hidden: false, dataset: {}, style: {},
-  classList: { toggle() {}, add() {}, remove() {} }, addEventListener() {}, setAttribute() {}, kids,
+  classList: { toggle() {}, add() {}, remove() {} }, on: {}, addEventListener(t, f) { this.on[t] = f; }, setAttribute() {}, kids,
   querySelector: sel => { if (!kids.has(sel)) kids.set(sel, el()); return kids.get(sel); },
   querySelectorAll: () => [], focus() {}, scrollIntoView() {}, childNodes: [], append() {} }; };
 const text = e => [e.innerHTML || e.textContent, ...[...e.kids.values()].map(text)].join('');
@@ -26,9 +26,11 @@ globalThis.window = {};
 globalThis.CSS = { escape: x => x };
 require(process.argv[1]);
 let input = ''; process.stdin.on('data', d => { input += d; }).on('end', () => {
-  const declareReadOnly = process.argv[2] === 'declare' ? () => {} : null;  // a host that takes declarations
-  window.ProfilerReport.render(root, JSON.parse(input), { name: 'wf', declareReadOnly });
-  console.log(JSON.stringify(Object.fromEntries([...slots].map(([k, e]) => [k, text(e)]))));
+  // a host that takes declarations; "declare <workflow>" opens that workflow and clicks the first button
+  const declared = [], declareReadOnly = process.argv[2] === 'declare' ? (...args) => declared.push(args) : null;
+  window.ProfilerReport.render(root, JSON.parse(input), { name: 'wf', declareReadOnly, workflow: process.argv[3] || null });
+  if (process.argv[3]) slots.get('all').on.click({ target: { closest: () => ({ dataset: { declare: '0' } }) } });
+  console.log(JSON.stringify({ ...Object.fromEntries([...slots].map(([k, e]) => [k, text(e)])), declared }));
 });
 """
 
@@ -242,6 +244,18 @@ def test_all_findings_lists_counted_findings_first_and_says_why_others_are_held_
     # a host that takes declarations gets a button instead
     hosted = _render(report, "declare")["all"]
     assert 'data-declare="0"' in hosted and "until you say so" not in hosted
+
+
+def test_a_workflow_opened_from_the_overview_hands_its_declarations_to_the_host():
+    report = _report()
+    report["observe"] = {"selected_workflow": "wf"}
+    report["summary"].update(risk_labels=LABELS, findings=[_finding("fetch_rates", 2.0, held_out="declaration", counted=False)])
+    overview = {"overview": {"workflows": [{"name": "wf", "runs": 3, "spend": 10.0, "replaceable": 0, "findings": 0}],
+                             "totals": {"spend": 10.0, "replaceable": 0, "findings": 0}},
+                "reports": {"wf": report}}
+    out = _render(overview, "declare", "wf")
+    assert 'data-declare="0"' in out["all"] and "until you say so" not in out["all"]
+    assert out["declared"] == [[["fetch_rates"], "wf"]]  # the steps, and which workflow they belong to
 
 
 def test_all_findings_shows_ten_then_a_show_all_button_and_is_absent_from_older_results():
