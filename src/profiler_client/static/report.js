@@ -485,6 +485,10 @@ const SHEET = HEAD + `
       <p class="why" data-r="stepWhy"></p>
     </div>
     <div class="events" data-r="events" hidden></div>
+    <details class="capacity" data-r="capacity" hidden>
+      <summary>Capacity view for this workflow</summary>
+      <div data-r="capBody"></div>
+    </details>
   </section>
   <section class="handoffs" data-r="handoffSection" hidden>
     <h3>Handoffs</h3>
@@ -1080,6 +1084,48 @@ function renderHead(q, g, name, meta) {
 
 // With `declareReadOnly` ((steps, workflow) => void), a finding held out until its step is declared read-only
 // gets a button that hands the host its steps and the report's workflow; without it the row says how to declare them.
+// the capacity sizing the pipeline solved for this workflow (B-POP): how many LLM calls a run
+// needs at peak, what each input rests on, and how the answer moves with the one it assumes
+const capCalls = n => n == null ? '—' : `${Number(n).toFixed(Number.isInteger(+n) ? 0 : 1)} ${+n === 1 ? 'call' : 'calls'}`;
+const times = v => `${+(+v).toFixed(2)}×`;
+// each input the sizing rests on, in plain words: from the traces, or set because traces can't show it
+function capInputs(f, st) {
+  const used = f?.used || {}, pv = f?.defaults?.provenance || {}, src = k => pv[k]?.label === 'DERIVED' ? 'From your traces' : 'Assumed';
+  const rows = [];
+  if (pv.unit_cost) rows.push(['Cost of a call', src('unit_cost'), 'What this workflow’s LLM calls cost, divided by how many there were.']);
+  if (pv.unit_value) rows.push(['Value of a used call', src('unit_value'), pv.unit_value.label === 'DERIVED' ? 'Given with the analysis.'
+    : `Traces can’t show it, so it is set to ${used.unit_cost ? times(used.unit_value / used.unit_cost) : 'a multiple of'} the cost of a call.`]);
+  if (pv.capacity_headroom) rows.push(['Headroom', src('capacity_headroom'), `At most ${times(used.capacity_headroom)} the peak; nothing in the traces measures it.`]);
+  if (pv.max_demand) rows.push(['Peak calls per run', src('max_demand'), `The ${esc(used.demand_model || '')} of calls per run across ${plural(st.count, 'run')}, not the single largest run.`]);
+  return rows.map(r => `<tr><td>${r[0]}</td><td data-label="Source">${r[1]}</td><td data-label="How">${r[2]}</td></tr>`).join('');
+}
+// the sizing at each assumed value, runs of the same size merged: "1.5× to 5× its cost"
+function capSensitivity(sens) {
+  const runs = [];
+  for (const s of sens || []) {
+    const x = Math.max(0, s.x?.x || 0), last = runs[runs.length - 1];
+    if (last && last.x === x) last.to = s.ratio; else runs.push({ from: s.ratio, to: s.ratio, x });
+  }
+  return runs.map(r => `<tr><td>${times(r.from)}${r.to !== r.from ? ` to ${times(r.to)}` : ''} its cost</td><td class="num" data-label="Size for">${r.x ? capCalls(r.x) : 'None, not worth providing'}</td></tr>`).join('');
+}
+function renderCapacity(q, data) {
+  const p = data.profile, f = data.formula;
+  q('capacity').hidden = !p?.x;
+  if (!p?.x) { q('capBody').innerHTML = ''; return; }
+  const st = f?.defaults?.usage_stats || {}, model = f?.used?.demand_model || f?.defaults?.demand_model || '';
+  const inputs = capInputs(f, st), sens = capSensitivity(p.sensitivity);
+  const agents = (p.by_agent?.agents || []).map(a =>
+    `<tr><td>${stepName(a.agent)}</td><td class="num" data-label="Peak calls per run">${capCalls(a.demand)}</td><td class="num" data-label="Size for">${capCalls(a.x)}</td></tr>`).join('');
+  q('capBody').innerHTML = `
+    <p>Size this workflow for <b>${capCalls(p.x.x)}</b> per run; runs used ${capCalls(p.y?.y)} at that size.
+      The peak is the ${esc(model)} of ${plural(st.count, 'run')}${st.count ? ` (median ${capCalls(st.p50)}, most ${capCalls(st.max)})` : ''}.</p>
+    <p class="why">This sizes capacity only. It doesn’t change any finding or the saving above.</p>
+    ${agents ? `<table class="tbl"><thead><tr><th>Agent</th><th class="num">Peak calls per run</th><th class="num">Size for</th></tr></thead><tbody>${agents}</tbody></table>` : ''}
+    ${inputs ? `<table class="tbl"><thead><tr><th>Input</th><th>Source</th><th>How</th></tr></thead><tbody>${inputs}</tbody></table>` : ''}
+    ${sens ? `<p class="why">The value of a used call can’t be seen in traces, so here is how the size moves with it.</p>
+      <table class="tbl"><thead><tr><th>If a used call is worth</th><th class="num">Size for</th></tr></thead><tbody>${sens}</tbody></table>` : ''}`;
+}
+
 function renderReport(root, data, { name = '', meta = [], showEvent = null, declareReadOnly = null } = {}) {
   root.innerHTML = SHEET;
   const q = k => root.querySelector(`[data-r="${k}"]`);
@@ -1152,6 +1198,7 @@ function renderReport(root, data, { name = '', meta = [], showEvent = null, decl
     if (b.dataset.covered) q('all').querySelector(`button[data-covered="${b.dataset.covered}"]`)?.focus();
   });
 
+  renderCapacity(q, data);
   const gaps = gapsOf(data);
   q('gaps').innerHTML = gaps.map(gap => `<dt>${esc(gap.label.charAt(0).toUpperCase() + gap.label.slice(1))}</dt><dd>${esc(gap.effect || '')}</dd>`).join('');
   q('gapsSection').hidden = gaps.length === 0;
