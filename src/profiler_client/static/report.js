@@ -1,6 +1,6 @@
 /* The AI Agent Profiler report: one renderer for the web view and for `profiler-client open`.
  *
- * ProfilerReport.render(root, data, { name, meta }) draws a report JSON into `root` (an element with
+ * ProfilerReport.render(root, data, { name, meta, declareReadOnly }) draws a report JSON into `root` (an element with
  * class "sheet"); `meta` is a list of short lines for under the title. It reads nothing but `data`,
  * makes no request, and writes only inside `root`. The host page adds its own buttons to `.tools`.
  *
@@ -1064,8 +1064,8 @@ function renderHead(q, g, name, meta) {
   if (g) { q('grade').dataset.g = g.grade; q('gradeLetter').textContent = g.grade; q('grade').setAttribute('aria-label', `Dataset grade ${g.grade}`); }
 }
 
-// With `declareReadOnly` (steps => void), a finding held out until its step is declared read-only gets a
-// button that hands the host its steps; without it the row says how to declare them.
+// With `declareReadOnly` ((steps, workflow) => void), a finding held out until its step is declared read-only
+// gets a button that hands the host its steps and the report's workflow; without it the row says how to declare them.
 function renderReport(root, data, { name = '', meta = [], showEvent = null, declareReadOnly = null } = {}) {
   root.innerHTML = SHEET;
   const q = k => root.querySelector(`[data-r="${k}"]`);
@@ -1127,7 +1127,7 @@ function renderReport(root, data, { name = '', meta = [], showEvent = null, decl
   q('all').addEventListener('click', e => {
     const b = e.target.closest('button[data-all], button[data-declare]');
     if (!b) return;
-    if (b.dataset.declare) declareReadOnly(data.summary.findings[b.dataset.declare].nodes);
+    if (b.dataset.declare) declareReadOnly(data.summary.findings[b.dataset.declare].nodes, data.observe?.selected_workflow ?? null);
     else renderAll(q, data, b.dataset.all === 'all', declareReadOnly);
   });
 
@@ -1188,7 +1188,7 @@ function renderOverviewRows(q, o, reports) {
       <td data-label="Findings">${count(r.findings)}${r.highest_risk ? `<span class="note">${esc(labels[r.highest_risk] || r.highest_risk)}</span>` : ''}</td></tr>`).join('');
 }
 
-function renderOverview(root, data, { name = '', meta = [], showEvent = null, workflow = null } = {}) {
+function renderOverview(root, data, { name = '', meta = [], showEvent = null, declareReadOnly = null, workflow = null } = {}) {
   const o = data.overview;
   // redraw `root`, keeping what the host added: its buttons in .tools and anything after the sheet
   let own = new Set();
@@ -1218,7 +1218,7 @@ function renderOverview(root, data, { name = '', meta = [], showEvent = null, wo
   const show = wf => {
     if (!data.reports[wf]) return;
     redraw(() => {
-      renderReport(root, data.reports[wf], { name: wf, meta: [plainName(name), ...meta].filter(Boolean), showEvent });
+      renderReport(root, data.reports[wf], { name: wf, meta: [plainName(name), ...meta].filter(Boolean), showEvent, declareReadOnly });
       const back = root.querySelector('[data-r="back"]');
       back.hidden = false;
       back.addEventListener('click', () => overview(wf));
