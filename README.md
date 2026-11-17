@@ -133,13 +133,16 @@ manifest.
 Each event has its own id (`event_id`, a pseudonym of the message, tool call
 or span id) in the same id space as its `parent`, so the profiler can draw
 which step started which. A tool call's parent is the LLM call that chose it,
-or its enclosing span in OpenTelemetry; when that span is an agent or chain
-span the client skips, it's the LLM call that ran just before the tool,
-and the event says `parent_by: "order"`: the trace records no link, so the
-map draws it dashed as "ran next", never as a choice
+or its enclosing span in OpenTelemetry
 (`parent_relation: invokes`). For your
 own event log the client can't know what `parent` means, so it says
 `unspecified`.
+
+| Field | Values | Meaning |
+| --- | --- | --- |
+| `event_id` | pseudonym, or absent (contract v1) | this event's id, in the same id space as `parent` |
+| `parent` | an `event_id`, or absent | the event that started this one |
+| `parent_by` | `"order"`, or absent (since v0.30.0) | `"order"`: the trace records no parent for this event, so the client took the LLM call that ran just before it (an OpenTelemetry tool span under an agent or chain span the client skips). The map draws it dashed as "ran next", never as a choice. Absent: `parent` is recorded by the trace. The analysis reads `parent` the same either way. |
 
 The first line of `events.jsonl` is a seal: the client, contract and policy
 versions, what `parent` means, the event count, the kept names and the
