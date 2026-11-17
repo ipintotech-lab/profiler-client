@@ -24,8 +24,11 @@ call's trigger is the tools that ran since the agent's previous LLM call,
 and its selection the tools that run until the next. Agents running side
 by side so don't mix their calls. A tool span's ``parent`` is its own
 parent span when that is an LLM or tool call; when it is a skipped span
-(an agent or chain), the parent is the LLM call that ran before the tool,
-marked ``parent_by="order"``: the map draws it as "ran next", not as a choice.
+(an agent or chain), the parent is the LLM call whose output asks for the
+tool's call id (``gen_ai.tool.call.id`` on the tool span), a recorded link;
+without a matching id it is the LLM call that ran before the tool, marked
+``parent_by="order"``: the map draws it as "ran next", not as a choice.
+The call ids themselves are never written.
 
 Handoffs between agents: the first call in an agent span gets as parent
 the call that handed over to it -- the span the agent span links to
@@ -43,6 +46,7 @@ so the profiler won't treat its calls as repeats of one input.
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 from typing import Any
 
@@ -52,6 +56,8 @@ from .names import Names
 
 _LLM_OPERATIONS = ("chat", "text_completion", "generate_content")
 _ERROR = 2  # OTLP STATUS_CODE_ERROR
+# an LLM span's output tool call ids, flattened (OpenLLMetry, OpenInference)
+_CALL_ID_KEY = re.compile(r"(gen_ai\.completion|llm\.output_messages)\.\d+\.(message\.)?tool_calls\.\d+\.(tool_call\.)?id")
 
 
 def is_otel_export(rows: list) -> bool:
@@ -143,6 +149,20 @@ def _name_decision(llm: dict, names: Names, step: str, given: Any, chose: Any) -
         llm["result"] = f"success:{names.token('output', chose)}"
 
 
+def _chosen_call_ids(attrs: dict) -> set[str]:
+    """The tool call ids an LLM span's output asks for: ``gen_ai.output.messages``
+    (parts of type ``tool_call``, or OpenAI-style ``tool_calls``) or the
+    flattened attributes ``_CALL_ID_KEY`` matches."""
+    ids = {str(v) for k, v in attrs.items() if v and _CALL_ID_KEY.fullmatch(k)}
+    messages = _parsed(attrs.get("gen_ai.output.messages"))
+    for message in messages if isinstance(messages, list) else []:
+        if isinstance(message, dict):
+            calls = [p for p in message.get("parts") or [] if isinstance(p, dict) and p.get("type") == "tool_call"]
+            calls += [c for c in message.get("tool_calls") or [] if isinstance(c, dict)]
+            ids |= {str(c["id"]) for c in calls if c.get("id")}
+    return ids
+
+
 def _is_agent(attrs: dict) -> bool:
     span_kind = str(attrs.get("openinference.span.kind") or attrs.get("traceloop.span.kind") or "").upper()
     return attrs.get("gen_ai.operation.name") == "invoke_agent" or span_kind == "AGENT"
@@ -226,6 +246,7 @@ def convert_otel_export(rows: list[dict], names: Names) -> Conversion:
     for trace_id, spans in by_trace.items():
         spans.sort(key=lambda s: s[0])
         kept = {s[4].get("spanId") for s in spans}
+        chose: dict[str, dict] = {}  # tool call id -> the LLM event whose output asked for it
         trace = _Trace({s[4]["spanId"]: s[4] for s in spans if s[4].get("spanId")}, skipped.get(trace_id, {}))
         for start, kind, resource, attrs, span, where in spans:
             here = trace.state(trace.agent_of(span.get("parentSpanId")))
@@ -292,6 +313,8 @@ def convert_otel_export(rows: list[dict], names: Names) -> Conversion:
                     traces_with_cost.add(event["trace_id"])
                 events.append(llm)
                 here.llm = llm
+                if llm["event_id"]:
+                    chose.update(dict.fromkeys(_chosen_call_ids(attrs), llm))
                 if span.get("spanId"):
                     trace.events_by_span[span["spanId"]] = llm
                 continue
@@ -311,7 +334,10 @@ def convert_otel_export(rows: list[dict], names: Names) -> Conversion:
                 result = f"error:{names.token('output', (span.get('status') or {}).get('message'))}"
             else:
                 result = "no_result"
-            if llm is not None and span.get("parentSpanId") not in kept and source is None:
+            call_id = _first(attrs, "gen_ai.tool.call.id", "tool_call.id")
+            if call_id is not None and str(call_id) in chose:  # the LLM's output names this call: recorded
+                event["parent"] = chose[str(call_id)]["event_id"]
+            elif llm is not None and span.get("parentSpanId") not in kept and source is None:
                 event["parent"], event["parent_by"] = llm["event_id"], "order"
             tool_event = {
                 **event,

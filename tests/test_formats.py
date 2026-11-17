@@ -396,6 +396,32 @@ def test_otel_tools_under_a_skipped_span_link_to_the_llm_call_before_them_by_ste
     assert all(e["parent"] != first_llm["event_id"] for e in events if e["event_type"] == "decision")
 
 
+@pytest.mark.parametrize("output", [
+    {"gen_ai.output.messages": json.dumps([{"role": "assistant", "parts": [
+        {"type": "tool_call", "id": "call_acme_77", "name": "deploy_acme_prod.py"}]}])},
+    {"gen_ai.output.messages": json.dumps([{"role": "assistant", "tool_calls": [{"id": "call_acme_77"}]}])},
+    {"gen_ai.completion.0.tool_calls.0.id": "call_acme_77"},
+    {"llm.output_messages.0.message.tool_calls.0.tool_call.id": "call_acme_77"},
+])
+def test_otel_a_tool_call_id_in_the_llm_output_makes_the_parent_a_recorded_choice(tmp_path, output):
+    rows = _otel_rows()[0]
+    s1, s2, s3, _ = rows["resourceSpans"][0]["scopeSpans"][0]["spans"][1:]
+    s1["attributes"] += [_attr(k, v) for k, v in output.items()]
+    s2["attributes"].append(_attr("gen_ai.tool.call.id", "call_acme_77"))
+    s3["attributes"].append(_attr("gen_ai.tool.call.id", "call_acme_nobody_asked"))
+    path = _write(tmp_path, "spans.json", rows, document=True)
+    prepare([path], tmp_path / "ready", Names(Pseudonymizer(new_key())))
+    text = (tmp_path / "ready" / EVENTS).read_text()
+    events = [json.loads(line) for line in text.splitlines()[1:]]
+    llm = next(e for e in events if e["event_type"] == "decision")
+    matched, unmatched = [e for e in events if e["event_type"] == "tool_call"]
+    # the LLM call's output names the tool call: a link the trace records, so the map says "chose"
+    assert matched["parent"] == llm["event_id"] and "parent_by" not in matched
+    # an id nobody asked for leaves the step-order parent as it was
+    assert unmatched["parent"] == llm["event_id"] and unmatched["parent_by"] == "order"
+    assert "call_acme" not in text  # only the link is written, never the ids
+
+
 def test_otel_a_named_decision_is_its_own_node_with_its_input_and_choice(tmp_path):
     rows = _otel_rows()[0]
     spans = rows["resourceSpans"][0]["scopeSpans"][0]["spans"]
