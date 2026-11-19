@@ -42,9 +42,9 @@ replaced by pseudonyms, is sent to Openly7. The report comes back here and is sh
   <label>Trace files <input type="file" id="files" multiple></label>
   <label class="check"><input type="checkbox" id="keepNames"> <span>Send workflow, agent, step and tool names as they are
     <span class="note">(single words only). Off: they are sent as pseudonyms.</span></span></label>
-  <label class="check"><input type="checkbox" id="llmInputs"> <span>Keep the LLM prompt
-    <span class="note">For each LLM call, send one pseudonym of everything the model read so far, so the report can tell
-    when a model call repeats. The prompt text itself is never sent.</span></span></label>
+  <label class="check"><input type="checkbox" id="llmInputs"> <span>Include a fingerprint of what the model read (no text is sent)
+    <span class="note">For each LLM call, one pseudonym of everything the model read so far, so the report can tell
+    when a model call repeats. The prompt and the model's reply stay on this computer.</span></span></label>
   <button type="button" id="prepare">Prepare</button>
   <p class="error" id="prepareError" role="alert"></p>
 </section>

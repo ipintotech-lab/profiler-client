@@ -32,8 +32,8 @@ profiler-client version
 ```
 
 `app` opens a page in your browser that runs on this computer. On it you
-choose your trace files, set the options (names sent as they are, and keeping
-a pseudonym of each LLM prompt; both off by default), check the summary, paste
+choose your trace files, set the options (names sent as they are, and "Include a
+fingerprint of what the model read (no text is sent)"; both off by default), check the summary, paste
 a client token from the Openly7 site and send. The page prepares the files
 exactly like `prepare`, uploads only the sealed `events.jsonl`, waits for the
 report and shows it with your names restored, as `open` does. It listens on
@@ -130,8 +130,9 @@ one report only when they share a key, and `open` restores names from each of
 the datasets a combined report lists.
 
 An LLM call's input is dropped by default, so the report can't tell whether
-the model was asked the same thing twice. With `--llm-inputs` (Claude Code,
-Codex and chat trajectories) each LLM call also gets one pseudonym of
+the model was asked the same thing twice. With `--llm-fingerprint`, "include a
+fingerprint of what the model read (no text is sent)" (Claude Code, Codex and
+chat trajectories; `--llm-inputs` is the old name), each LLM call also gets one pseudonym of
 everything the model read in its conversation so far, with call ids and
 signatures left out so a re-run of the same conversation matches. The text
 itself never leaves your machine, and the manifest records `llm_inputs`.
