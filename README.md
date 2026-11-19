@@ -19,6 +19,7 @@ Python 3.10+; the only dependency is pydantic.
 ## Use
 
 ```
+profiler-client app   # opens a page on this computer: choose files, prepare, send, see the report
 profiler-client check ~/.claude/projects/<project>/*.jsonl   # what the analysis can find, before preparing
 profiler-client prepare ~/.claude/projects/<project>/<session>.jsonl -o analysis-ready
 profiler-client prepare ~/.codex/sessions/2026/10/18/rollout-*.jsonl -o analysis-ready
@@ -29,6 +30,20 @@ profiler-client open report.json
 profiler-client forget report.json   # delete the local name list for that dataset
 profiler-client version
 ```
+
+`app` opens a page in your browser that runs on this computer. On it you
+choose your trace files, set the options (names sent as they are, and keeping
+a pseudonym of each LLM prompt; both off by default), check the summary, paste
+a client token from the Openly7 site and send. The page prepares the files
+exactly like `prepare`, uploads only the sealed `events.jsonl`, waits for the
+report and shows it with your names restored, as `open` does. It listens on
+127.0.0.1 only, on a random port, and the address it prints carries a
+one-time token that the page swaps for a cookie; any other host, origin or
+request without that cookie is refused. The token you paste is held in memory
+only. Your files are copied to a temporary folder that is deleted after
+preparing, and everything else is deleted when you stop the app (Ctrl-C).
+`--server` picks another Openly7 address, `--port` a fixed port and
+`--no-browser` just prints the address.
 
 `check` reads your raw traces in memory and prints the grade the server will
 give them, which findings the analysis can make from them (and which it

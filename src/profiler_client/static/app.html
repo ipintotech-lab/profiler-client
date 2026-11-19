@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>profiler-client app</title>
+<style>
+  :root { --bg: #f4f5f8; --card: #fff; --ink: #1d2030; --muted: #5b6075; --line: #d9dbe5; --accent: #3a3e9e; --bad: #a12a2a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #15161c; --card: #1f2029; --ink: #e8e9f0; --muted: #a3a7ba; --line: #353747; --accent: #9ea3ff; --bad: #ff8f8f; }
+  }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 "Helvetica Neue", Arial, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 48px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  h2 { font-size: 18px; margin: 0 0 12px; }
+  p { margin: 0 0 12px; }
+  .lead, .note { color: var(--muted); }
+  .note { font-size: 14px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 20px; margin-top: 20px; }
+  section[aria-disabled="true"] { opacity: .55; }
+  label { display: block; margin: 10px 0; }
+  label.check { display: flex; gap: 10px; align-items: flex-start; }
+  label.check input { margin-top: 5px; }
+  input[type=text], input[type=password], input[type=number] { font: inherit; color: inherit; background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; width: 100%; box-sizing: border-box; }
+  .prices { display: flex; gap: 12px; }
+  .prices label { flex: 1; }
+  button, a.btn { font: 600 15px/1.2 inherit; font-family: inherit; background: var(--accent); color: var(--card); border: 0;
+    border-radius: 6px; padding: 9px 16px; cursor: pointer; text-decoration: none; display: inline-block; margin-top: 8px; }
+  button:disabled { opacity: .5; cursor: default; }
+  a.plain { color: var(--accent); margin-left: 14px; }
+  pre { white-space: pre-wrap; background: var(--bg); border-radius: 6px; padding: 12px; font-size: 13px; overflow-x: auto; }
+  .error { color: var(--bad); font-weight: 600; }
+  [hidden] { display: none !important; }
+</style></head>
+<body><main>
+<h1>Find repeated work in your agent traces</h1>
+<p class="lead">This page runs on your computer. Your files are read here; only the prepared dataset, with names
+replaced by pseudonyms, is sent to Openly7. The report comes back here and is shown with your names.</p>
+
+<section id="choose">
+  <h2>1. Choose your trace files</h2>
+  <p class="note">Claude Code or Codex CLI sessions, OpenTelemetry OTLP JSON, OpenAI chat trajectories, or your own event
+  log (JSON or JSONL). Choose a session's subagent files too.</p>
+  <label>Trace files <input type="file" id="files" multiple></label>
+  <label class="check"><input type="checkbox" id="keepNames"> <span>Send workflow, agent, step and tool names as they are
+    <span class="note">(single words only). Off: they are sent as pseudonyms.</span></span></label>
+  <label class="check"><input type="checkbox" id="llmInputs"> <span>Keep the LLM prompt
+    <span class="note">For each LLM call, send one pseudonym of everything the model read so far, so the report can tell
+    when a model call repeats. The prompt text itself is never sent.</span></span></label>
+  <button type="button" id="prepare">Prepare</button>
+  <p class="error" id="prepareError" role="alert"></p>
+</section>
+
+<section id="send" aria-disabled="true">
+  <h2>2. Check and send</h2>
+  <p id="summary"></p>
+  <pre id="check" hidden></pre>
+  <label>Openly7 client token <input type="password" id="token" autocomplete="off" placeholder="pc_…"></label>
+  <p class="note">Make one on the Openly7 site under Client tokens. It is kept in this app's memory only, never saved.</p>
+  <div class="prices">
+    <label>$ per 1M input tokens <input type="number" id="priceIn" min="0" step="any"></label>
+    <label>$ per 1M output tokens <input type="number" id="priceOut" min="0" step="any"></label>
+  </div>
+  <p class="note">Optional: prices to cost model calls whose traces have no cost.</p>
+  <button type="button" id="submit" disabled>Send to Openly7</button>
+  <p id="progress" role="status"></p>
+  <p class="error" id="sendError" role="alert"></p>
+</section>
+
+<section id="done" hidden>
+  <h2>3. Your report</h2>
+  <p>The report is ready, with your names restored on this computer.</p>
+  <a class="btn" href="/report" target="_blank" rel="noopener">Open the report</a>
+  <a class="plain" href="/report.json" download="report.json">Save the report JSON</a>
+  <p class="note">The JSON keeps pseudonyms. Later, <code>profiler-client open report.json</code> shows it with your names again.</p>
+</section>
+</main>
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+  const say = (id, text) => { $(id).textContent = text || ''; };
+  async function call(method, path, body) {
+    const res = await fetch(path, { method, headers: body instanceof Blob ? {} : { 'Content-Type': 'application/json' },
+                                    body: body instanceof Blob || body == null ? body : JSON.stringify(body) });
+    const data = res.headers.get('Content-Type') === 'application/json' ? await res.json() : { error: await res.text() };
+    if (!res.ok) throw new Error(data.error || `request failed (${res.status})`);
+    return data;
+  }
+
+  $('prepare').addEventListener('click', async () => {
+    const chosen = [...$('files').files];
+    say('prepareError');
+    if (!chosen.length) return say('prepareError', 'Choose at least one trace file.');
+    $('prepare').disabled = true;
+    $('submit').disabled = true;
+    $('send').setAttribute('aria-disabled', 'true');
+    $('done').hidden = true;
+    try {
+      await call('POST', '/api/reset', {});
+      for (const [i, f] of chosen.entries()) {
+        say('summary', `Copying ${i + 1} of ${chosen.length}: ${f.name}`);
+        await call('PUT', `/api/raw?name=${encodeURIComponent(f.name)}`, f);
+      }
+      say('summary', 'Preparing…');
+      const out = await call('POST', '/api/prepare', { keep_names: $('keepNames').checked, llm_inputs: $('llmInputs').checked });
+      say('summary', `Prepared ${out.sessions.toLocaleString()} session(s), ${out.events.toLocaleString()} events` +
+          (out.kept_names.length ? `; names sent as they are: ${out.kept_names.join(', ')}` : '; names sent as pseudonyms') + '.');
+      $('check').textContent = out.check;
+      $('check').hidden = false;
+      $('send').setAttribute('aria-disabled', 'false');
+      $('submit').disabled = false;
+    } catch (e) {
+      say('summary');
+      say('prepareError', e.message);
+    } finally {
+      $('prepare').disabled = false;
+    }
+  });
+
+  $('submit').addEventListener('click', async () => {
+    say('sendError');
+    const pin = $('priceIn').value, pout = $('priceOut').value;
+    if ((pin === '') !== (pout === '')) return say('sendError', 'Give both prices, or leave both empty.');
+    $('submit').disabled = true;
+    $('prepare').disabled = true;
+    say('progress', 'Sending the dataset…');
+    try {
+      await call('POST', '/api/submit', { token: $('token').value.trim(),
+                                         prices: pin === '' ? null : [Number(pin), Number(pout)] });
+      $('token').value = '';
+      for (;;) {
+        const s = await call('GET', '/api/status');
+        if (s.report) break;
+        if (s.status === 'FAILED' || s.status === 'EXPIRED' || s.status === 'CANCELLED')
+          throw new Error(s.error || `the analysis ${s.status.toLowerCase()}`);
+        say('progress', s.status === 'RUNNING' ? 'Openly7 is making the report…' : 'Waiting for Openly7 to start…');
+        await new Promise(r => setTimeout(r, 3000));
+      }
+      say('progress', '');
+      $('done').hidden = false;
+      $('done').scrollIntoView({ block: 'start' });
+    } catch (e) {
+      say('progress');
+      say('sendError', e.message);
+      $('submit').disabled = false;
+    } finally {
+      $('prepare').disabled = false;
+    }
+  });
+})();
+</script>
+</body></html>
