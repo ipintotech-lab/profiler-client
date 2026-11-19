@@ -7,6 +7,7 @@ sent anywhere.
     profiler-client inspect analysis-ready
     profiler-client validate analysis-ready
     profiler-client show-event report.json h:<event id>
+    profiler-client app   # a page on 127.0.0.1: choose files, prepare, send, see the report
 """
 from __future__ import annotations
 
@@ -32,6 +33,31 @@ from .trace_refs import original_record, read_refs, refs_dir, write_refs
 # file fails cleanly instead of exhausting memory or the recursion stack
 MAX_REPORT_BYTES = 64 * 1024 * 1024
 HEX64 = re.compile(r"[a-f0-9]{64}")
+DEFAULT_SERVER = "https://openly7.com"
+
+
+def prepare_dataset(paths: list[Path], output: Path, *, keep_names: bool = False, llm_inputs: bool = False,
+                    key_file: str | None = None, name_list: bool = True) -> tuple[dict, list[dict]]:
+    """``prepare``: write the dataset to ``output`` and, unless
+    ``name_list`` is False, keep its name list and event references on this
+    machine. Returns the manifest and the events."""
+    key = load_or_create_key(Path(key_file).expanduser()) if key_file else new_key()
+    names = Names(Pseudonymizer(key), keep=keep_names, llm_inputs=llm_inputs)
+    refs = {} if name_list else None
+    manifest = prepare(paths, output, names, refs)
+    seal, events = read_sealed((output / EVENTS).read_bytes())
+    if refs is not None:
+        write_name_list(seal["payload_sha256"], {**names.seen, **names.field_values()})
+        write_refs(seal["payload_sha256"], refs)
+    return manifest, events
+
+
+def prepare_check(manifest: dict, events: list[dict], files: int) -> str:
+    """The ``check`` text for a dataset just prepared from ``files`` files."""
+    report = readiness([TraceEvent.model_validate(e) for e in events])
+    return _check_text({"readable": {"files": files, "read": files, "skipped": [],
+                                     "formats": dict.fromkeys(manifest["source_format"].split("+"), 1)},
+                        **report, "remediation": remediation(report, prices=False)})
 
 
 def _prepare(args: argparse.Namespace) -> int:
@@ -39,14 +65,9 @@ def _prepare(args: argparse.Namespace) -> int:
     print("reading:", file=sys.stderr)
     for p in paths:
         print(f"  {p}", file=sys.stderr)
-    key = load_or_create_key(Path(args.key_file).expanduser()) if args.key_file else new_key()
-    names = Names(Pseudonymizer(key), keep=args.keep_names, llm_inputs=args.llm_inputs)
-    refs = None if args.no_name_list else {}
-    manifest = prepare(paths, Path(args.output), names, refs)
-    seal, events = read_sealed((Path(args.output) / EVENTS).read_bytes())
-    if refs is not None:
-        write_name_list(seal["payload_sha256"], {**names.seen, **names.field_values()})
-        write_refs(seal["payload_sha256"], refs)
+    manifest, events = prepare_dataset(paths, Path(args.output), keep_names=args.keep_names,
+                                       llm_inputs=args.llm_inputs, key_file=args.key_file,
+                                       name_list=not args.no_name_list)
     print(f"wrote {manifest['events']} events from {manifest['sessions']} session(s) "
           f"({manifest['source_format']}) to {args.output}", file=sys.stderr)
     if manifest["kept_names"]:
@@ -55,10 +76,7 @@ def _prepare(args: argparse.Namespace) -> int:
     if manifest["sessions_without_cost"]:
         print(f"note: {manifest['sessions_without_cost']} session(s) recorded no cost; their cost shows as 0",
               file=sys.stderr)
-    report = readiness([TraceEvent.model_validate(e) for e in events])
-    print("\n" + _check_text({"readable": {"files": len(paths), "read": len(paths), "skipped": [],
-                                            "formats": dict.fromkeys(manifest["source_format"].split("+"), 1)},
-                               **report, "remediation": remediation(report, prices=False)}), file=sys.stderr)
+    print("\n" + prepare_check(manifest, events, len(paths)), file=sys.stderr)
     if not args.key_file:
         print("note: a fresh key was used and not kept, so this dataset can't be linked to any other", file=sys.stderr)
     return 0
@@ -162,7 +180,11 @@ def _dataset_hashes(report: dict) -> list[str]:
 
 
 def _read_report(source: Path) -> dict:
-    raw = source.read_bytes()
+    return parse_report(source.read_bytes())
+
+
+def parse_report(raw: bytes) -> dict:
+    """A report JSON's object, refusing one too large or deep to read."""
     if len(raw) > MAX_REPORT_BYTES:
         raise ValueError(f"report is larger than {MAX_REPORT_BYTES} bytes")
     try:
@@ -174,9 +196,11 @@ def _read_report(source: Path) -> dict:
     return report
 
 
-def _open(args: argparse.Namespace) -> int:
-    source = Path(args.report)
-    report = _read_report(source)
+def restore_names(report: dict) -> tuple[dict, set[str], set[str], list[str], list[str]]:
+    """The report with the names this machine's name lists hold put back:
+    ``(report, found, missing, hashes, unlisted)`` -- the pseudonyms
+    restored and not, the report's dataset hashes, and those with no name
+    list here."""
     hashes = _dataset_hashes(report)
     found: set[str] = set()
     missing: set[str] = set()
@@ -191,8 +215,18 @@ def _open(args: argparse.Namespace) -> int:
         report = translate(report, names, found, missing)
     except RecursionError:
         raise ValueError("report is nested too deeply to read") from None
+    return report, found, missing, hashes, unlisted
+
+
+def report_title(report: dict, default: str) -> str:
     observe = report.get("observe")
-    title = (observe.get("selected_workflow") if isinstance(observe, dict) else None) or source.stem
+    return (observe.get("selected_workflow") if isinstance(observe, dict) else None) or default
+
+
+def _open(args: argparse.Namespace) -> int:
+    source = Path(args.report)
+    report, found, missing, hashes, unlisted = restore_names(_read_report(source))
+    title = report_title(report, source.stem)
     output = Path(args.output) if args.output else source.with_suffix(".html")
     replaced = output.exists()
     # the decoded page holds your real values; keep it owner-only (0600),
@@ -251,6 +285,12 @@ def _forget(args: argparse.Namespace) -> int:
             raise ValueError("that report has no dataset hash (payload_sha256) to forget")
     for digest in digests:
         print(f"{_forget_one(digest)} for dataset {digest[:12]}…")
+    return 0
+
+
+def _app(args: argparse.Namespace) -> int:
+    from .app import serve  # the HTTP modules load only for this command
+    serve(args.server, port=args.port, open_browser=not args.no_browser)
     return 0
 
 
@@ -318,6 +358,12 @@ def main(argv: list[str] | None = None) -> int:
     fg.add_argument("--all", action="store_true", help="delete every name list and event reference on this machine")
     fg.set_defaults(run=_forget)
 
+    ap = sub.add_parser("app", help="open a page on this machine to choose trace files, prepare them, send them to "
+                                    "Openly7 and see the report with your names restored")
+    ap.add_argument("--server", default=DEFAULT_SERVER, help=f"the Openly7 site to send to (default {DEFAULT_SERVER})")
+    ap.add_argument("--port", type=int, default=0, help="port on 127.0.0.1 (default: any free one)")
+    ap.add_argument("--no-browser", action="store_true", help="print the page's address instead of opening it")
+    ap.set_defaults(run=_app)
     sub.add_parser("version", help="print client, contract and policy versions").set_defaults(run=_version)
 
     args = parser.parse_args(argv)
