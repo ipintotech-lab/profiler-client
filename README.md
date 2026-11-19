@@ -112,6 +112,8 @@ dataset. The lint accepts no other names.
 The full clear-text vocabulary is in
 [`src/profiler_client/policy.py`](src/profiler_client/policy.py). Any word not
 on it becomes a pseudonym.
+[`docs/what-is-sent.md`](docs/what-is-sent.md) lists, per option, what is
+sent and what never leaves the machine.
 
 A pseudonym is `h:` plus HMAC-SHA256 of the value under a secret key. Equal
 values get equal pseudonyms, which is all the profiler needs to tell whether
