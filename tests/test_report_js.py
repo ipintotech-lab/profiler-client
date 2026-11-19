@@ -376,3 +376,47 @@ def test_a_recorded_link_is_chose_and_the_map_has_no_step_order_line():
     page = _render(_linked_report(None))["map"]
     assert "(chose)" in page and "chose: the trace records" in page
     assert "ran next" not in page and "Built from step order" not in page
+
+
+def _needs_review(**extra):
+    return {**_finding("route_checks", None, "medium", counted=False, held_out="needs_review", observations=1223),
+            "type": "PARTIAL_LLM_BYPASS", "consistency": 0.8545, "covered_cost": 0.397, **extra}
+
+
+def test_a_rule_for_most_calls_needs_review_with_its_consistency_and_the_cost_it_covers():
+    report = _report()
+    report["summary"].update(risk_labels=LABELS, findings=[_finding("kyc_lookup", 1.5), _needs_review()])
+    report["summary"]["next_steps"] = [{**_step("PARTIAL_LLM_BYPASS", ["route_checks"], None, "review"),
+                                        "observations": 1223, "consistency": 0.8545, "covered_cost": 0.397}]
+    report["summary"]["opportunities"] = [{"type": "PARTIAL_LLM_BYPASS", "nodes": ["route_checks"], "title": "route_checks",
+                                           "saving": None, "observations": 1223}]
+    page = _render(report)
+    evidence = "A rule handles 85% of 1,223 calls, the rest falls back to the model. The calls the rule handles cost $0.397."
+    for slot in ("all", "first"):
+        assert "Needs review: a rule for most calls" in page[slot] and evidence in page[slot]
+    assert "Not in the headline: needs review" in page["all"] and page["all"].count('class="held"') == 1
+    assert "No saving counted" in page["first"]
+
+
+def test_the_step_map_marks_a_needs_review_decision_in_words():
+    events = []
+    for run in ("r1", "r2", "r3"):
+        events += [_ev(run, f"{run}a", "lookup"),
+                   TraceEvent(trace_id="t", run_id=run, workflow="wf", agent="a", event_type="decision", node="route",
+                              event_id=f"{run}d", parent=f"{run}a", model="m", cost=0.01),
+                   _ev(run, f"{run}b", "send", f"{run}d")]
+    report = {"availability": {"graph": {"available": True}}, "graph": build_graph(events, "wf", "invokes")["graph"],
+              "summary": {"totals": {"cost": 0.03, "runs": 3}, "next_steps": [],
+                          "opportunities": [{"type": "PARTIAL_LLM_BYPASS", "nodes": ["route"], "title": "route",
+                                             "saving": None, "observations": 3}]}}
+    page = _render(report)["map"]
+    assert 'data-marks="needs review"' in page and "LLM call a rule could handle most of the time" in page
+
+
+def test_the_page_keeps_a_needs_review_findings_consistency_and_covered_cost():
+    from profiler_client.report import view
+    o = {"type": "PARTIAL_LLM_BYPASS", "title": "route", "nodes": ["route"], "saving": None, "observations": 20,
+         "consistency": 0.85, "covered_cost": 0.17}
+    page = view({"summary": {"opportunities": [o], "next_steps": [{**o, "step": "review"}]}})
+    for kept in (page["summary"]["opportunities"][0], page["summary"]["next_steps"][0]):
+        assert kept["consistency"] == 0.85 and kept["covered_cost"] == 0.17

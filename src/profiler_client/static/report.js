@@ -23,6 +23,7 @@ const KIND = {
   CACHE_RESULT: 'Same call, same input, same result',
   EXTRACT_DETERMINISTIC_SUBSTEP: 'Same steps in the same order',
   CONDITIONAL_LLM_BYPASS: 'An LLM choice that never changes',
+  PARTIAL_LLM_BYPASS: 'An LLM choice that mostly stays the same',
   REVIEW_HIDDEN_STATE: 'Same request, different results',
   CROSS_AGENT_DUPLICATE: 'Same call by more than one agent in a run',
 };
@@ -30,6 +31,7 @@ const KIND = {
 const TITLE = {
   CACHE_RESULT: 'Reuse a repeated result',
   CONDITIONAL_LLM_BYPASS: 'Replace an LLM decision with a rule',
+  PARTIAL_LLM_BYPASS: 'Needs review: a rule for most calls',
   EXTRACT_DETERMINISTIC_SUBSTEP: 'Script a fixed sequence',
   DETERMINISTIC_REGION: 'Skip the LLM for one slice of inputs',
   REVIEW_HIDDEN_STATE: 'Unstable result: find the cause',
@@ -39,6 +41,9 @@ const STEP = { replay: 'Replay', review: 'Review', declare: 'Declare', investiga
 const EVIDENCE = {
   CACHE_RESULT: n => `${plural(n, 'call')} had the same input and gave the same result.`,
   CONDITIONAL_LLM_BYPASS: n => `The LLM made the same choice in all ${plural(n, 'call')}.`,
+  // a choice the model makes most of the time: a rule handles those calls, the model the rest
+  PARTIAL_LLM_BYPASS: (n, o) => `A rule handles ${o.consistency == null ? 'most' : share(o.consistency, 1)} of ${plural(n, 'call')}, the rest falls back to the model.` +
+    (o.covered_cost ? ` The calls the rule handles cost ${money(o.covered_cost)}.` : ''),
   EXTRACT_DETERMINISTIC_SUBSTEP: n => `These steps ran in this order ${plural(n, 'time')}.`,
   DETERMINISTIC_REGION: n => `${plural(n, 'call')} fall in this slice of inputs.`,
   REVIEW_HIDDEN_STATE: n => `Across ${plural(n, 'call')}, the same request gave different results.`,
@@ -49,11 +54,12 @@ const lookupInputs = o => o.type === 'CONDITIONAL_LLM_BYPASS' ? (o.by_input ? o.
 const title = o => lookupInputs(o) ? 'Replace an LLM decision with a lookup' : TITLE[o.type] || o.type;
 const evidenceOf = o => lookupInputs(o)
   ? `${plural(lookupInputs(o), 'different input')}, each always given the same choice, across ${plural(o.observations, 'call')}.`
-  : (EVIDENCE[o.type] || (k => plural(k, 'call') + ' seen.'))(o.observations);
+  : (EVIDENCE[o.type] || (k => plural(k, 'call') + ' seen.'))(o.observations, o);
 // what the map marks on a step a finding is about: each has its own words, never colour alone
 const MARK = {
   unstable: { badge: 'unstable result', legend: 'the same request gave different results' },
   replace: { badge: 'rule or script', legend: 'LLM call a rule or script could replace' },
+  review: { badge: 'needs review', legend: 'LLM call a rule could handle most of the time' },
   repeats: { badge: 'repeats', legend: 'tool call that repeats with the same input and result' },
   shared: { badge: 'shared', legend: 'tool call more than one agent makes in a run, with the same input and result' },
 };
@@ -87,6 +93,7 @@ function marksOf(data, byId) {
     else if (o.type === 'CACHE_RESULT') nodes.forEach(id => add(id, 'repeats', o, 'step'));
     else if (o.type === 'CROSS_AGENT_DUPLICATE') { /* marked below, on every agent's copy */ }
     else if (o.type === 'EXTRACT_DETERMINISTIC_SUBSTEP') nodes.slice(0, -1).forEach(id => add(LLM_AFTER + id, 'replace', o));
+    else if (o.type === 'PARTIAL_LLM_BYPASS') nodes.forEach(id => add(id, 'review', o, 'llm_call'));
     else nodes.forEach(id => add(id, 'replace', o, 'llm_call'));  // a rule, or a rule for one slice
     const agents = sharedBy(o);
     for (const step of agents.length ? nodes : []) {
@@ -643,6 +650,7 @@ const ALL_SHOWN = 10;
 const HELD = {
   overlap: 'Not in the headline: a larger finding already counts these calls.',
   no_saving: 'No saving counted.',
+  needs_review: 'Not in the headline: needs review. The model still answers the calls the rule doesn’t cover.',
 };
 function renderAll(q, data, showAll, declare, open = new Set()) {
   const rows = data.summary?.findings, labels = data.summary?.risk_labels || {};
