@@ -94,6 +94,7 @@
 .sheet .mapbox .node.replace rect { stroke: var(--estimate); stroke-width: 3; }
 .sheet .mapbox .node.repeats rect { stroke: var(--carbon-deep); stroke-width: 2.5; }
 .sheet .mapbox .node.shared rect { stroke: var(--shared); stroke-width: 2.5; }
+.sheet .mapbox .node.review rect { stroke: var(--estimate); stroke-width: 2.5; stroke-dasharray: 3 3; }
 .sheet .mapbox .node.unstable rect { stroke: var(--bad); stroke-width: 3; stroke-dasharray: 6 3; }
 .sheet .mapbox .node.sel rect { stroke: var(--ink); stroke-width: 4; stroke-dasharray: none; }
 .sheet .mapbox .badge rect { stroke: none; }
@@ -101,6 +102,7 @@
 .sheet .mapbox .badge.replace rect, .sheet .pill.replace { fill: var(--estimate); background: var(--estimate); }
 .sheet .mapbox .badge.repeats rect, .sheet .pill.repeats { fill: var(--carbon-deep); background: var(--carbon-deep); }
 .sheet .mapbox .badge.unstable rect, .sheet .pill.unstable { fill: var(--bad); background: var(--bad); }
+.sheet .mapbox .badge.review rect, .sheet .pill.review { fill: var(--ink-2); background: var(--ink-2); }
 .sheet .mapbox .badge.shared rect, .sheet .pill.shared { fill: var(--shared); background: var(--shared); }
 .sheet .mapbox .badge text { fill: #fff; }
 .sheet .mapbox .legend.marks { margin: 0 0 12px; }
