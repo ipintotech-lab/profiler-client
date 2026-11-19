@@ -229,7 +229,7 @@ class Handler(BaseHTTPRequestHandler):
     server: AppServer
     protocol_version = "HTTP/1.1"
 
-    def log_message(self, format, *args):  # noqa: A002 -- the start address holds the token; log nothing
+    def log_message(self, format, *args):  # the start address holds the token; log nothing
         pass
 
     def _send(self, code: int, body: bytes = b"", content_type: str = "text/plain; charset=utf-8",
@@ -310,7 +310,7 @@ class Handler(BaseHTTPRequestHandler):
                 with session.lock:
                     return self._json(200, session.status())
             return self._send(404, b"not found")
-        except (ValueError, PrepareError, RemoteError, OSError) as exc:
+        except (ValueError, TypeError, PrepareError, RemoteError, OSError) as exc:
             self.close_connection = True  # a refused upload may leave its body unread
             return self._json(400, {"error": str(exc)})
 
@@ -320,7 +320,7 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("request too large")
         data = json.loads(self.rfile.read(length) or b"{}")
         if not isinstance(data, dict):
-            raise ValueError("send a JSON object")
+            raise TypeError("send a JSON object")
         return data
 
     do_GET = do_PUT = do_POST = _route

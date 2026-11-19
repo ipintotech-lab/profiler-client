@@ -13,11 +13,10 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
+from conftest import CANARIES
 
 from profiler_client import app
 from profiler_client.dataset import read_sealed
-
-from conftest import CANARIES
 
 CLIENT_TOKEN = "pc_" + "k" * 40
 
