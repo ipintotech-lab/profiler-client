@@ -117,7 +117,7 @@ const unsure = s => {
 };
 const unsureTry = s => unsure(s) === 'unrecorded'
   ? 'The trace doesn’t record all of what this step saw, so calls that look the same can’t be compared.' +
-    (String(s.node).startsWith('llm_call') ? ' Prepare the dataset with <code>profiler-client prepare --llm-inputs</code> to record a pseudonym of what each LLM call read.' : '')
+    (String(s.node).startsWith('llm_call') ? ' Prepare the dataset with <code>profiler-client prepare --llm-fingerprint</code> to include a fingerprint of what each LLM call read (no text is sent).' : '')
   : `Only ${count(s.evidence?.repeated_observations || 0)} of its ${plural(s.occurrences, 'call')} had an input seen on another call. ` +
     'Send more runs of this workflow, so the same inputs come up again and the report can tell whether this step repeats.';
 

@@ -151,7 +151,7 @@ def test_the_start_address_swaps_its_token_for_a_strict_cookie(local):
 def test_nothing_is_served_without_the_session_cookie(local, path):
     assert request(local, "GET", path, cookie=False)[0] == 403
     code, headers, page = request(local, "GET", "/")
-    assert code == 200 and b"Keep the LLM prompt" in page
+    assert code == 200 and b"Include a fingerprint of what the model read (no text is sent)" in page
     assert headers["X-Frame-Options"] == "DENY" and "frame-ancestors 'none'" in headers["Content-Security-Policy"]
     assert headers["Cache-Control"] == "no-store"
 

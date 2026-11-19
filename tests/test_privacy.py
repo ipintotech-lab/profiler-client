@@ -400,6 +400,13 @@ def test_llm_inputs_are_off_by_default(transcript_rows):
     assert all("input" not in e["input_state"] for e in _events(transcript_rows) if e["event_type"] == "decision")
 
 
+@pytest.mark.parametrize("flag", ["--llm-fingerprint", "--llm-inputs"])  # new name, old name kept
+def test_the_fingerprint_flag_sets_llm_inputs_under_either_name(tmp_path, transcript_file, flag):
+    out = tmp_path / "ready"
+    assert cli.main(["prepare", str(transcript_file), "-o", str(out), "--no-name-list", flag]) == 0
+    assert json.loads((out / "manifest.json").read_text())["llm_inputs"] is True
+
+
 def test_llm_inputs_are_complete_pseudonyms_that_pass_the_lint(tmp_path, transcript_file):
     calls = _llm_inputs([json.loads(line) for line in transcript_file.read_text().splitlines()])
     assert all(e["input_state"]["input"].startswith("h:") and e["input_complete"] for e in calls)

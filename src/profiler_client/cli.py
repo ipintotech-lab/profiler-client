@@ -318,10 +318,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--keep-names", action="store_true",
                    help="keep your workflow, agent, node and tool names readable (single words only); "
                         "inspect lists every kept name")
-    p.add_argument("--llm-inputs", action="store_true",
-                   help="also send, for each LLM call, one pseudonym of everything the model read so far, so the "
-                        "report can tell when a model call repeats; the text itself is never sent "
-                        "(Claude Code, Codex and chat trajectories)")
+    p.add_argument("--llm-fingerprint", "--llm-inputs", dest="llm_inputs", action="store_true",
+                   help="include a fingerprint of what the model read (no text is sent): for each LLM call, one "
+                        "pseudonym of everything the model read so far, so the report can tell when a model call "
+                        "repeats (Claude Code, Codex and chat trajectories; --llm-inputs is the old name)")
     p.add_argument("--no-name-list", action="store_true",
                    help="don't keep pseudonym-to-name mappings or event references (for show-event) on this machine")
     p.set_defaults(run=_prepare)
