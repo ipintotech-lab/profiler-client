@@ -170,7 +170,7 @@ output. They also run every command with sockets disabled.
 ## Terms
 
 The full terms and privacy notes are at
-[agentsprofiler-production.up.railway.app/client-terms](https://agentsprofiler-production.up.railway.app/client-terms).
+[openly7.com/client-terms](https://openly7.com/client-terms).
 In short:
 
 - **The software.** The client is open source under Apache-2.0. You may use,
@@ -186,7 +186,7 @@ In short:
   before you share it.
 - **Sending it to the beta.** Uploading a dataset to the hosted AI Agent
   Profiler beta is covered by the
-  [beta terms and privacy notice](https://agentsprofiler-production.up.railway.app/#terms),
+  [beta terms and privacy notice](https://openly7.com/#terms),
   which you accept before your first upload.
 
 ## License
