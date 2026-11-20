@@ -305,7 +305,18 @@ def _version(_: argparse.Namespace) -> int:
     return 0
 
 
+def _utf8_output() -> None:
+    """Print UTF-8 whatever the console's code page. On Windows, output sent
+    to a pipe or file otherwise uses the locale's code page (cp1252, cp1255,
+    ...), which can't encode names like ``llm_call ← Bash`` and fails."""
+    for stream in (sys.stdout, sys.stderr):
+        if (getattr(stream, "encoding", None) or "").lower().replace("-", "") != "utf8" \
+                and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _utf8_output()
     parser = argparse.ArgumentParser(prog="profiler-client", description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
 

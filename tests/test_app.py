@@ -259,7 +259,7 @@ def test_server_origin_accepts_the_site_and_a_local_check():
 def test_stopping_the_app_deletes_the_files_it_copied(tmp_path):
     env = {**os.environ, "TMPDIR": str(tmp_path), "XDG_DATA_HOME": str(tmp_path / "data")}
     proc = subprocess.Popen([sys.executable, "-m", "profiler_client.cli", "app", "--no-browser"],
-                            stdout=subprocess.PIPE, text=True, env=env)
+                            stdout=subprocess.PIPE, text=True, env=env, encoding="utf-8")
     try:
         assert re.search(r"http://127\.0\.0\.1:\d+/\?t=", proc.stdout.readline() + proc.stdout.readline()
                          + proc.stdout.readline())

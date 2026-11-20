@@ -31,6 +31,13 @@ TOKEN = re.compile(r"h:[0-9a-f]{64}")
 
 KEY_BYTES = 32
 
+# Windows has no Unix permission bits: ``os.open`` ignores 0o600 and ``stat``
+# reports every file as 0o666, so the check below would refuse every key file
+# after the run that made it. There a file's access comes from its folder's
+# ACL (a user's profile folder is private to that user), so the check runs on
+# every other OS only.
+CHECK_MODE = os.name != "nt"
+
 
 def canonical(value: Any) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str).encode()
@@ -58,9 +65,10 @@ def new_key() -> bytes:
 
 
 def load_or_create_key(path: Path) -> bytes:
-    """Read a persistent key, creating it (mode 0600) if it doesn't exist."""
+    """Read a persistent key, creating it (mode 0600) if it doesn't exist.
+    On Windows the file takes its folder's access instead (``CHECK_MODE``)."""
     if path.exists():
-        if path.stat().st_mode & 0o077:
+        if CHECK_MODE and path.stat().st_mode & 0o077:
             raise ValueError(f"{path} is readable by other users; run: chmod 600 {path}")
         key = bytes.fromhex(path.read_text(encoding="ascii").strip())
         if len(key) < KEY_BYTES:

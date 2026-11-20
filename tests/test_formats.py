@@ -158,7 +158,7 @@ FORMATS = {
 def _prepare(tmp_path, source, keep=False):
     out = tmp_path / "ready"
     manifest = prepare([FORMATS[source](tmp_path)], out, Names(Pseudonymizer(new_key()), keep=keep))
-    events = [json.loads(line) for line in (out / EVENTS).read_text().splitlines()[1:]]  # after the seal
+    events = [json.loads(line) for line in (out / EVENTS).read_text(encoding="utf-8").splitlines()[1:]]  # after the seal
     return out, manifest, events
 
 
@@ -168,7 +168,7 @@ def test_no_canary_reaches_the_dataset_in_any_form(tmp_path, source):
     assert manifest["source_format"] == source
     assert manifest["kept_names"] == []
     assert events
-    written = (out / EVENTS).read_text() + (out / MANIFEST).read_text()
+    written = (out / EVENTS).read_text(encoding="utf-8") + (out / MANIFEST).read_text(encoding="utf-8")
     for canary in CANARIES:
         for form in canary_forms(canary):
             assert form not in written, f"a form of canary {canary!r} leaked from {source}"
@@ -242,15 +242,15 @@ def test_keep_names_keeps_single_word_names_only_and_lists_them(tmp_path):
     assert tool["node"] == "corp_cli" and tool["tool"] == {"name": "corp_cli"}
     assert llm["workflow"] == "acme-secret-project" and llm["decision"]["selected"] == "corp_cli"
     assert llm["node"].startswith("h:")  # a sentence is never kept
-    written = (out / EVENTS).read_text()
+    written = (out / EVENTS).read_text(encoding="utf-8")
     for canary in ("ACME_TOKEN_9f8e7d", "customer list for Acme Corp", "make deploy-acme", "acme-finetune-v3"):
         assert canary not in written
     validate(out)
     # the manifest must agree with the seal
     manifest_file = out / MANIFEST
-    edited = json.loads(manifest_file.read_text())
+    edited = json.loads(manifest_file.read_text(encoding="utf-8"))
     edited["kept_names"] = ["acme-agent"]
-    manifest_file.write_text(json.dumps(edited))
+    manifest_file.write_text(json.dumps(edited), encoding="utf-8")
     with pytest.raises(PrepareError, match="MANIFEST_INVALID"):
         validate(out)
     # a kept name the seal doesn't list fails the lint, even with a recomputed hash
@@ -264,7 +264,7 @@ def test_keep_names_keeps_single_word_names_only_and_lists_them(tmp_path):
 def test_keep_names_never_keeps_contents_in_codex(tmp_path):
     out, manifest, _ = _prepare(tmp_path, "codex", keep=True)
     assert manifest["kept_names"] == ["acme-secret-project", "mcp__acme_internal__lookup"]
-    written = (out / EVENTS).read_text()
+    written = (out / EVENTS).read_text(encoding="utf-8")
     for canary in ("deploy_acme_prod.py", "corp_cli", "ACME_TOKEN_9f8e7d", "customer list for Acme Corp"):
         assert canary not in written
 
@@ -278,7 +278,7 @@ def test_cli_prints_the_format_and_kept_names(tmp_path, capsys):
 
 def test_a_document_that_is_no_trace_format_is_refused(tmp_path):
     path = tmp_path / "other.json"
-    path.write_text(json.dumps({"rows": [{"trace_id": "t"}]}, indent=2))
+    path.write_text(json.dumps({"rows": [{"trace_id": "t"}]}, indent=2), encoding="utf-8")
     with pytest.raises(PrepareError, match="FORMAT_UNSUPPORTED"):
         prepare([path], tmp_path / "out", Names(Pseudonymizer(new_key())))
 
@@ -315,7 +315,7 @@ def test_llm_inputs_match_across_runs_with_new_ids_and_never_leak(tmp_path, sour
     def calls(rows, name):
         out = tmp_path / name
         prepare([_write(tmp_path, f"{name}.jsonl", rows)], out, Names(Pseudonymizer(b"k" * 32), llm_inputs=True))
-        written = (out / EVENTS).read_text()
+        written = (out / EVENTS).read_text(encoding="utf-8")
         for canary in CANARIES:
             for form in canary_forms(canary):
                 assert form not in written, f"a form of canary {canary!r} leaked from {source}"
@@ -341,7 +341,7 @@ def _prepare_any(tmp_path, source, transcript_file):
     if source == "claude-code":
         out = tmp_path / "ready"
         manifest = prepare([transcript_file], out, Names(Pseudonymizer(new_key())))
-        return out, manifest, [json.loads(line) for line in (out / EVENTS).read_text().splitlines()[1:]]
+        return out, manifest, [json.loads(line) for line in (out / EVENTS).read_text(encoding="utf-8").splitlines()[1:]]
     return _prepare(tmp_path, source)
 
 
@@ -377,7 +377,7 @@ def test_otel_ids_are_span_ids_in_the_parents_id_space(tmp_path):
     path = tmp_path / "spans.json"
     path.write_text(json.dumps(rows), encoding="utf-8")
     prepare([path], tmp_path / "ready", Names(Pseudonymizer(new_key())))
-    events = [json.loads(line) for line in (tmp_path / "ready" / EVENTS).read_text().splitlines()[1:]]
+    events = [json.loads(line) for line in (tmp_path / "ready" / EVENTS).read_text(encoding="utf-8").splitlines()[1:]]
     llm = next(e for e in events if e["event_type"] == "decision")
     assert next(e for e in events if e.get("parent") == llm["event_id"])["event_type"] == "tool_call"
     assert "parent_by" not in next(e for e in events if e.get("parent") == llm["event_id"])  # recorded, not step order
@@ -387,7 +387,7 @@ def test_otel_tools_under_a_skipped_span_link_to_the_llm_call_before_them_by_ste
     # every span's parent is an agent/chain span the client skips, as most GenAI instrumentations emit
     path = _write(tmp_path, "spans.json", _otel_rows()[0], document=True)
     prepare([path], tmp_path / "ready", Names(Pseudonymizer(new_key())))
-    events = [json.loads(line) for line in (tmp_path / "ready" / EVENTS).read_text().splitlines()[1:]]
+    events = [json.loads(line) for line in (tmp_path / "ready" / EVENTS).read_text(encoding="utf-8").splitlines()[1:]]
     first_llm = next(e for e in events if e["event_type"] == "decision")
     tools = [e for e in events if e["event_type"] == "tool_call"]
     assert len(tools) == 2 and all(t["parent"] == first_llm["event_id"] for t in tools)
@@ -411,7 +411,7 @@ def test_otel_a_tool_call_id_in_the_llm_output_makes_the_parent_a_recorded_choic
     s3["attributes"].append(_attr("gen_ai.tool.call.id", "call_acme_nobody_asked"))
     path = _write(tmp_path, "spans.json", rows, document=True)
     prepare([path], tmp_path / "ready", Names(Pseudonymizer(new_key())))
-    text = (tmp_path / "ready" / EVENTS).read_text()
+    text = (tmp_path / "ready" / EVENTS).read_text(encoding="utf-8")
     events = [json.loads(line) for line in text.splitlines()[1:]]
     llm = next(e for e in events if e["event_type"] == "decision")
     matched, unmatched = [e for e in events if e["event_type"] == "tool_call"]
@@ -435,7 +435,7 @@ def test_otel_a_named_decision_is_its_own_node_with_its_input_and_choice(tmp_pat
     path = _write(tmp_path, "spans.json", rows, document=True)
     names = Names(Pseudonymizer(new_key()), keep=True)
     prepare([path], tmp_path / "ready", names)
-    events = [json.loads(line) for line in (tmp_path / "ready" / EVENTS).read_text().splitlines()[1:]]
+    events = [json.loads(line) for line in (tmp_path / "ready" / EVENTS).read_text(encoding="utf-8").splitlines()[1:]]
     handoffs = [e for e in events if e["node"] == "handoff"]
     assert len(handoffs) == 2
     first, again = handoffs
@@ -448,7 +448,7 @@ def test_otel_a_named_decision_is_its_own_node_with_its_input_and_choice(tmp_pat
     # the tools it chose still hang under it; an unnamed call is named by its trigger
     assert {e["parent"] for e in events if e["event_type"] == "tool_call"} == {first["event_id"]}
     assert [e["node"] for e in events if e["event_type"] == "decision"][1].startswith("llm_call ← ")
-    assert "Acme" not in (tmp_path / "ready" / EVENTS).read_text()
+    assert "Acme" not in (tmp_path / "ready" / EVENTS).read_text(encoding="utf-8")
 
 
 def test_an_event_log_keeps_its_own_ids_and_parents_as_pseudonyms(tmp_path):
@@ -457,9 +457,9 @@ def test_an_event_log_keeps_its_own_ids_and_parents_as_pseudonyms(tmp_path):
     rows["events"][1]["parent"] = "acme-evt-1"
     path = _write(tmp_path, "events.json", rows, document=True)
     prepare([path], tmp_path / "ready", Names(Pseudonymizer(new_key())))
-    events = [json.loads(line) for line in (tmp_path / "ready" / EVENTS).read_text().splitlines()[1:]]
+    events = [json.loads(line) for line in (tmp_path / "ready" / EVENTS).read_text(encoding="utf-8").splitlines()[1:]]
     assert events[1]["parent"] == events[0]["event_id"]
-    assert "acme-evt-1" not in (tmp_path / "ready" / EVENTS).read_text()
+    assert "acme-evt-1" not in (tmp_path / "ready" / EVENTS).read_text(encoding="utf-8")
 
 
 def test_an_event_log_turn_name_shared_by_agents_is_split_as_otel_names_turns(tmp_path):
@@ -485,7 +485,7 @@ def test_an_event_log_turn_name_shared_by_agents_is_split_as_otel_names_turns(tm
             ev(8, "letter", "decision", "choose_template", parent=5, selected="tpl-b")]
     path = _write(tmp_path, "events.jsonl", rows)
     prepare([path], tmp_path / "ready", Names(Pseudonymizer(new_key()), keep=True))
-    events = [json.loads(line) for line in (tmp_path / "ready" / EVENTS).read_text().splitlines()[1:]]
+    events = [json.loads(line) for line in (tmp_path / "ready" / EVENTS).read_text(encoding="utf-8").splitlines()[1:]]
     assert [e["node"] for e in events] == [
         "llm_call ← user_prompt", "get_app", "llm_call ← get_app",
         "llm_call ← next_action", "lookup", "llm_call ← lookup", "choose_template", "choose_template"]
@@ -494,7 +494,7 @@ def test_an_event_log_turn_name_shared_by_agents_is_split_as_otel_names_turns(tm
 def _split_nodes(tmp_path, rows):
     path = _write(tmp_path, "events.jsonl", rows)
     prepare([path], tmp_path / "ready", Names(Pseudonymizer(new_key()), keep=True))
-    return [json.loads(line)["node"] for line in (tmp_path / "ready" / EVENTS).read_text().splitlines()[1:]]
+    return [json.loads(line)["node"] for line in (tmp_path / "ready" / EVENTS).read_text(encoding="utf-8").splitlines()[1:]]
 
 
 def _one_agent(turns):
@@ -535,7 +535,7 @@ def test_one_agents_name_after_different_steps_is_split_only_when_it_routes(tmp_
 def _prepared(tmp_path, rows):
     path = _write(tmp_path, "events.jsonl", rows)
     prepare([path], tmp_path / "ready", Names(Pseudonymizer(new_key()), keep=True))
-    return [json.loads(line) for line in (tmp_path / "ready" / EVENTS).read_text().splitlines()[1:]]
+    return [json.loads(line) for line in (tmp_path / "ready" / EVENTS).read_text(encoding="utf-8").splitlines()[1:]]
 
 
 def test_a_decision_without_a_selection_gets_the_one_shown_by_what_followed(tmp_path):
@@ -578,7 +578,7 @@ def test_the_loan_flow_names_every_model_turn_alike_in_both_formats(tmp_path):
         raw = tmp_path / f"{fmt}.jsonl"
         raw.write_bytes(gzip.decompress((Path(__file__).parent / "data" / "loan-day" / f"{fmt}.jsonl.gz").read_bytes()))
         prepare([raw], tmp_path / fmt, Names(Pseudonymizer(new_key()), keep=True))
-        events = [json.loads(line) for line in (tmp_path / fmt / EVENTS).read_text().splitlines()[1:]]
+        events = [json.loads(line) for line in (tmp_path / fmt / EVENTS).read_text(encoding="utf-8").splitlines()[1:]]
         names[fmt] = Counter((e["agent"], e["node"]) for e in events if e["event_type"] == "decision")
     assert names["events"] == names["otlp-traces"]
     assert names["events"][("kyc-verification", "llm_call ← user_prompt")]

@@ -126,6 +126,8 @@ the whole input, so a custom tool's argument names never leave the machine. With
 can check a guess. By default every `prepare` uses a fresh key that isn't kept,
 so two datasets can't be linked. To compare datasets over time, pass
 `--key-file ~/.config/profiler-client/key`; the file is created with mode 0600.
+Windows has no such mode: there the file gets its folder's access, so keep it
+in a folder only you can read, such as one under your user profile.
 If you lose it, you can no longer compare. The seal records a `key_id` that
 names the key without revealing it: the server combines several datasets into
 one report only when they share a key, and `open` restores names from each of
