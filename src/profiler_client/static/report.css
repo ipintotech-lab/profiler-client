@@ -122,7 +122,7 @@
 .sheet .risks .tile { border: 1px solid var(--rule); border-left: 4px solid var(--carbon); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; font-size: 15px; break-inside: avoid; }
 .sheet .risks .tile[data-risk="medium"] { border-left-color: var(--estimate); }
 .sheet .risks .tile[data-risk="high"] { border-left-color: var(--bad); }
-.sheet .risks h4 { margin: 0; font-size: 16px; }
+.sheet .risks h3 { margin: 0; font-size: 16px; }
 .sheet .risks .fig { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .sheet .risks .fig .k { font-size: 13px; font-weight: 400; }
 .sheet .risks .k { color: var(--ink-2); font-size: 13px; }
@@ -234,9 +234,10 @@
 .sheet .mapbox .am.router rect { fill: var(--paper); stroke: var(--rule); }
 .sheet .mapbox .am.unstable rect { stroke: var(--bad); stroke-width: 2.5; stroke-dasharray: 6 4; }
 .sheet .mapbox .am.chip rect { stroke-width: 1; }
-.sheet .mapbox .am:hover rect, .sheet .mapbox .am:focus-visible rect { stroke-width: 3; }
+.sheet .mapbox .am:hover rect { stroke-width: 3; }
 .sheet .mapbox .am:focus { outline: none; }
 .sheet .mapbox .am.sel rect { stroke: var(--ink); stroke-width: 3.5; }
+.sheet .mapbox .am:focus-visible rect { stroke: var(--carbon); stroke-width: 4; stroke-dasharray: none; }
 .sheet .mapbox .am .t { fill: var(--ink); font-size: 13px; font-weight: 600; }
 .sheet .mapbox .am .f { fill: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; }
 .sheet .mapbox .am .s, .sheet .mapbox .am .c { fill: var(--ink); font-size: 12px; font-family: var(--mono); }
