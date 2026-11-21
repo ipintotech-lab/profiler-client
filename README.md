@@ -41,7 +41,10 @@ report and shows it with your names restored, as `open` does. It listens on
 one-time token that the page swaps for a cookie; any other host, origin or
 request without that cookie is refused. The token you paste is held in memory
 only. Your files are copied to a temporary folder that is deleted after
-preparing, and everything else is deleted when you stop the app (Ctrl-C).
+preparing, and everything else is deleted when the app exits (Ctrl-C). An
+app that is interrupted, for example killed, or on Windows ended by a sign-out
+or shutdown, can leave the folder behind; deleting it at the next start is
+planned ([#58](https://github.com/ipintotech-lab/profiler-client/issues/58)).
 `--server` picks another Openly7 address, `--port` a fixed port and
 `--no-browser` just prints the address.
 
@@ -57,7 +60,9 @@ grades below B. `prepare` prints the same summary when it finishes.
 
 `prepare` saves a pseudonym-to-name list for the dataset in a private local
 directory (`$XDG_DATA_HOME/profiler-client/names/`, `~/.local/share/...` by
-default), mode 0600, outside the dataset directory — so it is never uploaded.
+default), outside the dataset directory — so it is never uploaded. On Mac and
+Linux it is mode 0600; on Windows it has only the access of your user folder
+(see [`docs/what-is-sent.md`](docs/what-is-sent.md#kept-on-this-machine-only)).
 It holds names, plus the values of your event log's input fields that take at
 most 20 short values (a band, a status, a flag), so a report can say
 `defect_band=<1%`. Outputs, ids, prompts and every other input are never
@@ -66,7 +71,8 @@ written. Use
 (or a dataset hash, or `--all`) to delete it.
 
 After downloading a report JSON, `open` writes a local HTML copy with matching
-names restored, owner-only (mode 0600); no report data is sent anywhere. It
+names restored, owner-only on Mac and Linux (mode 0600; on Windows it has the
+access of the folder it is written to); no report data is sent anywhere. It
 restores only from the list for that exact dataset, says how many pseudonyms it
 couldn't match, and — since the HTML holds your real values — keep it local
 rather than re-uploading or sharing it.
@@ -125,8 +131,16 @@ a field's value, never the value itself. Other formats keep one pseudonym for
 the whole input, so a custom tool's argument names never leave the machine. Without the key nobody
 can check a guess. By default every `prepare` uses a fresh key that isn't kept,
 so two datasets can't be linked. To compare datasets over time, pass
-`--key-file ~/.config/profiler-client/key`; the file is created with mode 0600.
-If you lose it, you can no longer compare. The seal records a `key_id` that
+`--key-file ~/.config/profiler-client/key`. On Mac and Linux the file is
+created with mode 0600; on Windows the key is encrypted for your Windows
+account (DPAPI), so a copy is useless to another account or machine. A team
+can share one key from its secret store instead, with `--key-env VAR` or
+`--key-command COMMAND` (the key in hex, 64 characters, e.g. from
+`openssl rand -hex 32`). The command's own error output is shown on the
+terminal unchanged, so it must not print the key there. If you lose the key, you can
+no longer compare; a key that can't be read is an error, never replaced by a
+new one. [`docs/what-is-sent.md`](docs/what-is-sent.md#how-the-key-is-protected)
+says what protects the key on each system and what it doesn't. The seal records a `key_id` that
 names the key without revealing it: the server combines several datasets into
 one report only when they share a key, and `open` restores names from each of
 the datasets a combined report lists.

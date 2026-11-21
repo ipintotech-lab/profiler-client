@@ -4,6 +4,7 @@ import json
 import os
 
 import pytest
+from conftest import UNIX_MODES
 from test_formats import FORMATS
 
 from profiler_client import cli
@@ -22,7 +23,7 @@ def _prepare(tmp_path, monkeypatch, source, transcript_file, *extra):
     assert cli.main(["prepare", str(trace), "-o", str(out), "--key-file", str(key), *extra]) == 0
     seal, events = read_sealed((out / EVENTS).read_bytes())
     report = tmp_path / "report.json"
-    report.write_text(json.dumps({"payload_sha256": seal["payload_sha256"]}))
+    report.write_text(json.dumps({"payload_sha256": seal["payload_sha256"]}), encoding="utf-8")
     return trace, report, events, Names(Pseudonymizer(load_or_create_key(key))), seal["payload_sha256"]
 
 
@@ -64,7 +65,7 @@ def test_a_changed_or_missing_file_is_said_plainly_and_nothing_is_shown(tmp_path
                                                                         transcript_file):
     trace, report, events, _, _ = _prepare(tmp_path, monkeypatch, "claude-code", transcript_file)
     event_id = events[0]["event_id"]
-    trace.write_text(trace.read_text().replace("Acme Corp", "Acme Inc"))
+    trace.write_text(trace.read_text(encoding="utf-8").replace("Acme Corp", "Acme Inc"), encoding="utf-8")
     code, out, err = _show(report, event_id, capsys)
     assert code == 1 and out == "" and "has changed" in err
     trace.unlink()
@@ -79,17 +80,18 @@ def test_an_unknown_event_or_dataset_is_refused(tmp_path, monkeypatch, capsys, t
     assert code == 1 and out == "" and "isn't in" in err
     assert _show(report, "not-an-id", capsys)[0] == 1
     other = tmp_path / "other.json"
-    other.write_text(json.dumps({"payload_sha256": "f" * 64}))
+    other.write_text(json.dumps({"payload_sha256": "f" * 64}), encoding="utf-8")
     code, out, err = _show(other, "h:" + "0" * 64, capsys)
     assert code == 1 and "no event references" in err
 
 
+@UNIX_MODES
 def test_refs_are_private_skipped_without_a_name_list_and_forgotten(tmp_path, monkeypatch, capsys, transcript_file):
     _, report, events, _, digest = _prepare(tmp_path, monkeypatch, "claude-code", transcript_file)
     refs = tmp_path / "data" / "profiler-client" / "refs" / f"{digest}.json"
     assert os.stat(refs).st_mode & 0o777 == 0o600
     # the trace's contents never go into the refs, only where to find them
-    assert "Acme" not in refs.read_text()
+    assert "Acme" not in refs.read_text(encoding="utf-8")
     assert cli.main(["forget", str(report)]) == 0
     assert not refs.exists()
     assert _show(report, events[0]["event_id"], capsys)[0] == 1

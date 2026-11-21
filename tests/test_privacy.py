@@ -6,7 +6,7 @@ import socket
 from pathlib import Path
 
 import pytest
-from conftest import CANARIES, canary_forms
+from conftest import CANARIES, SYMLINKS, UNIX_MODES, canary_forms
 
 from profiler_client import cli
 from profiler_client.claude_code import convert_claude_code_transcript
@@ -24,7 +24,7 @@ def _events(rows, key=b"k" * 32):
 def test_no_canary_reaches_the_dataset_in_any_form(tmp_path, transcript_file):
     out = tmp_path / "ready"
     prepare([transcript_file], out, Names(Pseudonymizer(new_key())))
-    written = (out / EVENTS).read_text() + (out / "manifest.json").read_text()
+    written = (out / EVENTS).read_text(encoding="utf-8") + (out / "manifest.json").read_text(encoding="utf-8")
     for canary in CANARIES:
         for form in canary_forms(canary):
             assert form not in written, f"a form of canary {canary!r} leaked"
@@ -74,7 +74,7 @@ def test_validate_catches_an_edited_payload(tmp_path, transcript_file):
     out = tmp_path / "ready"
     prepare([transcript_file], out, Names(Pseudonymizer(new_key())))
     validate(out)
-    with (out / EVENTS).open("a") as f:
+    with (out / EVENTS).open("a", encoding="utf-8") as f:
         f.write(json.dumps({"node": "x"}) + "\n")
     with pytest.raises(PrepareError, match="PAYLOAD_CHANGED"):
         validate(out)
@@ -108,24 +108,26 @@ def test_a_resealed_dataset_still_has_to_pass_the_lint():
     assert "Acme" not in str(exc.value)
 
 
+@SYMLINKS
 def test_symlinks_and_other_formats_are_refused(tmp_path, transcript_file):
     link = tmp_path / "link.jsonl"
     link.symlink_to(transcript_file)
     with pytest.raises(PrepareError, match="INPUT_SYMLINK"):
         prepare([link], tmp_path / "a", Names(Pseudonymizer(new_key())))
     other = tmp_path / "other.jsonl"
-    other.write_text('{"trace_id": "t"}\n')
+    other.write_text('{"trace_id": "t"}\n', encoding="utf-8")
     with pytest.raises(PrepareError, match="FORMAT_UNSUPPORTED"):
         prepare([other], tmp_path / "b", Names(Pseudonymizer(new_key())))
 
 
 def test_errors_never_quote_file_content(tmp_path, capsys):
     bad = tmp_path / "bad.jsonl"
-    bad.write_text("ACME_TOKEN_9f8e7d not json\n")
+    bad.write_text("ACME_TOKEN_9f8e7d not json\n", encoding="utf-8")
     assert cli.main(["prepare", str(bad), "-o", str(tmp_path / "out")]) == 1
     assert "ACME_TOKEN_9f8e7d" not in capsys.readouterr().err
 
 
+@UNIX_MODES
 def test_key_file_is_private(tmp_path):
     path = tmp_path / "cfg" / "key"
     key = load_or_create_key(path)
@@ -136,6 +138,7 @@ def test_key_file_is_private(tmp_path):
         load_or_create_key(path)
 
 
+@UNIX_MODES
 def test_name_list_contains_names_but_never_inputs_outputs_or_ids(tmp_path):
     names = Names(Pseudonymizer(b"n" * 32))
     names.step("workflow-name")
@@ -148,7 +151,7 @@ def test_name_list_contains_names_but_never_inputs_outputs_or_ids(tmp_path):
     names.token("id", "private identifier")
 
     path = write_name_list("a" * 64, names.seen, tmp_path)
-    stored = json.loads(path.read_text())
+    stored = json.loads(path.read_text(encoding="utf-8"))
     assert stored["names"] == names.seen
     assert set(stored["names"].values()) == {
         "workflow-name", "agent-name", "tool-name", "private-model"
@@ -159,6 +162,7 @@ def test_name_list_contains_names_but_never_inputs_outputs_or_ids(tmp_path):
     assert os.stat(path).st_mode & 0o777 == 0o600
 
 
+@UNIX_MODES
 def test_prepare_writes_seal_hash_name_list_unless_disabled(tmp_path, transcript_file, monkeypatch):
     data_home = tmp_path / "data"
     monkeypatch.setenv("XDG_DATA_HOME", str(data_home))
@@ -170,7 +174,7 @@ def test_prepare_writes_seal_hash_name_list_unless_disabled(tmp_path, transcript
     name_path = data_home / "profiler-client" / "names" / f"{seal['payload_sha256']}.json"
     assert name_path.is_file()
     assert manifest["payload_sha256"] != seal["payload_sha256"]
-    assert json.loads(name_path.read_text())["names"]
+    assert json.loads(name_path.read_text(encoding="utf-8"))["names"]
     assert os.stat(name_path).st_mode & 0o777 == 0o600
 
     no_names = tmp_path / "ready-without-names"
@@ -178,6 +182,7 @@ def test_prepare_writes_seal_hash_name_list_unless_disabled(tmp_path, transcript
     assert list(name_path.parent.iterdir()) == [name_path]
 
 
+@UNIX_MODES
 def test_open_restores_names_from_matching_payload_hash(tmp_path, monkeypatch):
     payload_hash = "b" * 64
     workflow_token = "h:" + "1" * 64
@@ -191,11 +196,11 @@ def test_open_restores_names_from_matching_payload_hash(tmp_path, monkeypatch):
         "observe": {"selected_workflow": workflow_token, "workflows": [{"name": workflow_token, "num_runs": 1}]},
         "summary": {"totals": {"cost": 1, "runs": 1, "llm_calls": 0, "tool_calls": 1, "tokens": 0}},
         "mine": {"by_agent": {"agent": {"actions": [{"node": node_token, "occurrences": 1, "total_cost": 1}]}}},
-    }))
+    }), encoding="utf-8")
     output = tmp_path / "report.html"
 
     assert cli.main(["open", str(source), "-o", str(output)]) == 0
-    rendered = output.read_text()
+    rendered = output.read_text(encoding="utf-8")
     assert "billing-workflow" in rendered
     assert "calculate-total" in rendered
     assert workflow_token not in rendered
@@ -209,12 +214,12 @@ def test_open_draws_the_report_with_the_shared_renderer(tmp_path, monkeypatch):
     # and report text can't close the data script early
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     source = tmp_path / "report.json"
-    source.write_text(json.dumps({"summary": {"notes": "</script><script>alert(1)</script>"}, "observe": {}, "mine": {}}))
+    source.write_text(json.dumps({"summary": {"notes": "</script><script>alert(1)</script>"}, "observe": {}, "mine": {}}), encoding="utf-8")
     output = tmp_path / "report.html"
     assert cli.main(["open", str(source), "-o", str(output)]) == 0
-    rendered = output.read_text()
-    assert (STATIC / "report.js").read_text() in rendered
-    assert (STATIC / "report.css").read_text() in rendered
+    rendered = output.read_text(encoding="utf-8")
+    assert (STATIC / "report.js").read_text(encoding="utf-8") in rendered
+    assert (STATIC / "report.css").read_text(encoding="utf-8") in rendered
     assert "ProfilerReport.render(" in rendered
     assert "<script>alert(1)" not in rendered
     assert rendered.count("</script>") == 3  # the data, the renderer and the call: nothing from the report
@@ -227,9 +232,9 @@ def test_open_marks_the_page_restored_only_when_a_name_was_matched(tmp_path, mon
     write_name_list(payload_hash, {token: "fraud-screening"}, tmp_path / "profiler-client" / "names")
     def page(report):
         source, output = tmp_path / "report.json", tmp_path / "report.html"
-        source.write_text(json.dumps(report))
+        source.write_text(json.dumps(report), encoding="utf-8")
         assert cli.main(["open", str(source), "-o", str(output)]) == 0
-        text = output.read_text()
+        text = output.read_text(encoding="utf-8")
         start = text.index('id="report-data">') + len('id="report-data">')
         return json.loads(text[start:text.index("</script>", start)])
     graph = {"run_count": 1, "edges": [], "nodes": [{"id": token, "kind": "step", "occurrences": 1, "cost": 0}]}
@@ -252,10 +257,10 @@ def test_open_never_writes_a_findings_restored_inputs(tmp_path, monkeypatch):
         "summary": {"totals": {"cost": 1}, "opportunities": [
             {"type": "CACHE_RESULT", "nodes": [node_token], "groups": [{"input": {"query": value_token}}]}]},
         "mine": {"by_agent": {"agent": {"actions": [action]}}},
-    }))
+    }), encoding="utf-8")
     output = tmp_path / "report.html"
     assert cli.main(["open", str(source), "-o", str(output)]) == 0
-    rendered = output.read_text()
+    rendered = output.read_text(encoding="utf-8")
     assert "calculate-total" in rendered
     assert "private-input" not in rendered and value_token not in rendered
 
@@ -278,7 +283,7 @@ def test_forget_removes_only_the_named_datasets_list(tmp_path, monkeypatch):
     write_name_list(drop, {"h:" + "2" * 64: "drop-me"}, names_dir)
     # forget by a report JSON that names the dataset
     report = tmp_path / "r.json"
-    report.write_text(json.dumps({"payload_sha256": drop}))
+    report.write_text(json.dumps({"payload_sha256": drop}), encoding="utf-8")
     assert cli.main(["forget", str(report)]) == 0
     assert not (names_dir / f"{drop}.json").exists()
     assert (names_dir / f"{keep}.json").exists()
@@ -303,10 +308,10 @@ def test_open_without_a_hash_never_borrows_another_datasets_names(tmp_path, monk
     }
     for payload in (report, {**report, "payload_sha256": "c" * 64}):  # no hash, and a non-matching hash
         source = tmp_path / "report.json"
-        source.write_text(json.dumps(payload))
+        source.write_text(json.dumps(payload), encoding="utf-8")
         output = tmp_path / "report.html"
         assert cli.main(["open", str(source), "-o", str(output)]) == 0
-        rendered = output.read_text()
+        rendered = output.read_text(encoding="utf-8")
         assert "billing-workflow" not in rendered  # the other dataset's name never leaks in
         assert other_token[2:9] in rendered  # the pseudonym is shown instead
 
@@ -325,11 +330,11 @@ def test_runs_with_the_network_disabled(tmp_path, transcript_file, monkeypatch, 
     assert cli.main(["version"]) == 0
     # open is local too: a downloaded report is decoded with no network
     report = out.with_suffix(".report.json")
-    report.write_text(json.dumps({"summary": {"totals": {}}, "observe": {}, "mine": {}}))
+    report.write_text(json.dumps({"summary": {"totals": {}}, "observe": {}, "mine": {}}), encoding="utf-8")
     assert cli.main(["open", str(report), "-o", str(tmp_path / "r.html")]) == 0
     # and so is show-event
     seal, events = read_sealed((out / EVENTS).read_bytes())
-    report.write_text(json.dumps({"payload_sha256": seal["payload_sha256"]}))
+    report.write_text(json.dumps({"payload_sha256": seal["payload_sha256"]}), encoding="utf-8")
     assert cli.main(["show-event", str(report), events[0]["event_id"]]) == 0
 
 
@@ -354,7 +359,7 @@ def test_the_seal_names_the_key_so_datasets_sharing_it_can_be_combined(tmp_path,
     # the same key file gives the same id; a fresh key a different one
     assert ids[0] == ids[1] != ids[2]
     # the id doesn't reveal the key
-    assert ids[0] not in key_file.read_text()
+    assert ids[0] not in key_file.read_text(encoding="utf-8")
     bad = sealed_payload([], frozenset(), "NOT-HEX")
     with pytest.raises(PrepareError, match="key_id"):
         read_sealed(bad)
@@ -372,9 +377,9 @@ def test_open_restores_names_from_every_dataset_of_a_combined_report(tmp_path, m
         "payload_sha256s": [first, second, absent],
         "observe": {"selected_workflow": "h:" + "1" * 64, "workflows": [{"name": "h:" + "1" * 64, "num_runs": 1}]},
         "mine": {"by_agent": {"agent": {"actions": [{"node": "h:" + "2" * 64, "occurrences": 1, "total_cost": 1}]}}},
-    }))
+    }), encoding="utf-8")
     assert cli.main(["open", str(source), "-o", str(tmp_path / "report.html")]) == 0
-    rendered = (tmp_path / "report.html").read_text()
+    rendered = (tmp_path / "report.html").read_text(encoding="utf-8")
     assert "billing-workflow" in rendered and "calculate-total" in rendered
     assert f"no name list on this machine for dataset {absent[:12]}" in capsys.readouterr().out
     assert cli.main(["forget", str(source)]) == 0
@@ -407,17 +412,17 @@ def test_llm_inputs_are_off_by_default(transcript_rows):
 def test_the_fingerprint_flag_sets_llm_inputs_under_either_name(tmp_path, transcript_file, flag):
     out = tmp_path / "ready"
     assert cli.main(["prepare", str(transcript_file), "-o", str(out), "--no-name-list", flag]) == 0
-    assert json.loads((out / "manifest.json").read_text())["llm_inputs"] is True
+    assert json.loads((out / "manifest.json").read_text(encoding="utf-8"))["llm_inputs"] is True
 
 
 def test_llm_inputs_are_complete_pseudonyms_that_pass_the_lint(tmp_path, transcript_file):
-    calls = _llm_inputs([json.loads(line) for line in transcript_file.read_text().splitlines()])
+    calls = _llm_inputs([json.loads(line) for line in transcript_file.read_text(encoding="utf-8").splitlines()])
     assert all(e["input_state"]["input"].startswith("h:") and e["input_complete"] for e in calls)
     assert len({e["input_state"]["input"] for e in calls}) == len(calls)  # each call read more than the one before
     out = tmp_path / "ready"
     manifest = prepare([transcript_file], out, Names(Pseudonymizer(new_key()), llm_inputs=True))
     assert manifest["llm_inputs"] is True
-    written = (out / EVENTS).read_text() + (out / "manifest.json").read_text()
+    written = (out / EVENTS).read_text(encoding="utf-8") + (out / "manifest.json").read_text(encoding="utf-8")
     for canary in CANARIES:
         for form in canary_forms(canary):
             assert form not in written, f"a form of canary {canary!r} leaked"
@@ -446,11 +451,11 @@ def test_open_keeps_only_the_event_ids_a_map_step_can_look_up(tmp_path, monkeypa
     sample = [{"event_id": event_id, "run_id": run_id}, {"event_id": "not an id <b>"}]
     source = tmp_path / "it's a report.json"
     source.write_text(json.dumps({"graph": {"run_count": 1, "nodes": [], "edges": [
-        {"from": "@prompt", "to": "step", "kind": "starts", "transition_count": 1, "evidence_sample": sample}]}}))
+        {"from": "@prompt", "to": "step", "kind": "starts", "transition_count": 1, "evidence_sample": sample}]}}), encoding="utf-8")
     output = tmp_path / "report.html"
     assert cli.main(["open", str(source), "-o", str(output)]) == 0
-    rendered = output.read_text()
-    assert event_id in rendered and str(source.resolve()) in rendered
+    rendered = output.read_text(encoding="utf-8")
+    assert event_id in rendered and json.dumps(str(source.resolve()))[1:-1] in rendered  # as JSON in the page
     assert run_id not in rendered and "not an id" not in rendered
 
 
@@ -462,10 +467,10 @@ def test_open_keeps_each_map_steps_agent_with_its_name_restored(tmp_path, monkey
     write_name_list(payload_hash, {agent_token: "fraud-screening"}, tmp_path / "profiler-client" / "names")
     source = tmp_path / "report.json"
     source.write_text(json.dumps({"payload_sha256": payload_hash, "graph": {"run_count": 1, "edges": [], "nodes": [
-        {"id": "step", "kind": "step", "agent": agent_token, "occurrences": 1, "cost": 0, "extra": "dropped"}]}}))
+        {"id": "step", "kind": "step", "agent": agent_token, "occurrences": 1, "cost": 0, "extra": "dropped"}]}}), encoding="utf-8")
     output = tmp_path / "report.html"
     assert cli.main(["open", str(source), "-o", str(output)]) == 0
-    rendered = output.read_text()
+    rendered = output.read_text(encoding="utf-8")
     assert '"agent": "fraud-screening"' in rendered or '"agent":"fraud-screening"' in rendered
     assert agent_token not in rendered and "dropped" not in rendered
 
@@ -483,8 +488,8 @@ def test_open_keeps_a_per_agent_box_and_how_agents_hand_over(tmp_path, monkeypat
         {"id": box, "step": step_token, "kind": "step", "agent": agent_token, "occurrences": 2, "cost": 0}], "edges": [
         {"from": "route", "to": box, "kind": "invokes", "transition_count": 2, "distinct_run_count": 2,
          "fork": {"mode": "both", "share_of_runs": 0.667}, "loop": {"runs": 1, "share_of_runs": 0.333, "passes": 1.0},
-         "extra": "dropped"}]}}))
-    graph = view(translate(json.loads(source.read_text()), {step_token: "get_balance", agent_token: "fraud-screening"},
+         "extra": "dropped"}]}}), encoding="utf-8")
+    graph = view(translate(json.loads(source.read_text(encoding="utf-8")), {step_token: "get_balance", agent_token: "fraud-screening"},
                            set(), set()))["graph"]
     assert graph["nodes"][0]["id"] == "get_balance @ fraud-screening" and graph["nodes"][0]["step"] == "get_balance"
     edge = graph["edges"][0]
@@ -492,7 +497,7 @@ def test_open_keeps_a_per_agent_box_and_how_agents_hand_over(tmp_path, monkeypat
     assert "extra" not in edge
     output = tmp_path / "report.html"
     assert cli.main(["open", str(source), "-o", str(output)]) == 0
-    rendered = output.read_text()
+    rendered = output.read_text(encoding="utf-8")
     assert "get_balance @ fraud-screening" in rendered and step_token not in rendered and agent_token not in rendered
 
 def test_open_keeps_which_agents_repeat_a_call_between_them_and_nothing_of_the_call(tmp_path, monkeypatch):
@@ -509,15 +514,15 @@ def test_open_keeps_which_agents_repeat_a_call_between_them_and_nothing_of_the_c
              "between_agents": {"agents": ["credit", agent_token], "runs": 12, "extra": value_token}}
     source = tmp_path / "report.json"
     source.write_text(json.dumps({"payload_sha256": payload_hash,
-                                  "summary": {"totals": {"cost": 4}, "opportunities": [duplicate, cache]}}))
-    page = view(translate(json.loads(source.read_text()), names, set(), set()))["summary"]["opportunities"]
+                                  "summary": {"totals": {"cost": 4}, "opportunities": [duplicate, cache]}}), encoding="utf-8")
+    page = view(translate(json.loads(source.read_text(encoding="utf-8")), names, set(), set()))["summary"]["opportunities"]
     assert page[0]["agents"] == ["credit", "fraud-screening"]
     assert (page[0]["repeated_calls"], page[0]["repeated_latency_ms"]) == (12, 2400.0)
     assert "evidence_sample" not in page[0] and "side_effects" not in page[0]
     assert page[1]["between_agents"] == {"agents": ["credit", "fraud-screening"], "runs": 12}
     output = tmp_path / "report.html"
     assert cli.main(["open", str(source), "-o", str(output)]) == 0
-    rendered = output.read_text()
+    rendered = output.read_text(encoding="utf-8")
     assert "fraud-screening" in rendered and agent_token not in rendered
     assert "private-input" not in rendered and value_token not in rendered
 
@@ -534,13 +539,13 @@ def test_open_keeps_the_headline_and_next_steps_but_no_input_slice(tmp_path, mon
     source = tmp_path / "report.json"
     source.write_text(json.dumps({"payload_sha256": payload_hash, "summary": {
         "totals": {"cost": 4}, "replaceable": {"cost": 1.5, "findings": 1},
-        "risk_labels": {"medium": "Needs review"}, "next_steps": [step]}}))
-    page = view(json.loads(source.read_text()))["summary"]
+        "risk_labels": {"medium": "Needs review"}, "next_steps": [step]}}), encoding="utf-8")
+    page = view(json.loads(source.read_text(encoding="utf-8")))["summary"]
     assert page["replaceable"] == {"cost": 1.5, "findings": 1} and page["risk_labels"] == {"medium": "Needs review"}
     assert set(page["next_steps"][0]) == set(step) - {"where", "group", "workflow"}
     output = tmp_path / "report.html"
     assert cli.main(["open", str(source), "-o", str(output)]) == 0
-    rendered = output.read_text()
+    rendered = output.read_text(encoding="utf-8")
     assert "calculate-total" in rendered and node_token not in rendered
     assert "private-input" not in rendered and value_token not in rendered
 
@@ -565,15 +570,15 @@ def test_open_keeps_an_overviews_rows_and_each_workflows_report_with_names_resto
     source.write_text(json.dumps({"payload_sha256": payload_hash, "grade": {"grade": "B", "word": "Good"},
                                   "overview": {"workflows": [row], "totals": {"spend": 2.0, "replaceable": 0.5},
                                                "risk_labels": {"medium": "Needs review"}},
-                                  "reports": {wf_token: report}}))
-    page = view(json.loads(source.read_text()))
+                                  "reports": {wf_token: report}}), encoding="utf-8")
+    page = view(json.loads(source.read_text(encoding="utf-8")))
     assert set(page) == {"overview", "reports", "grade"}
     assert set(page["overview"]["workflows"][0]) == set(row) - {"where"}
     assert page["reports"][wf_token]["observe"]["selected_workflow"] == wf_token
     assert "where" not in page["reports"][wf_token]["summary"]["next_steps"][0]
     output = tmp_path / "overview.html"
     assert cli.main(["open", str(source), "-o", str(output)]) == 0
-    rendered = output.read_text()
+    rendered = output.read_text(encoding="utf-8")
     assert rendered.count("fraud-screening") >= 3 and wf_token not in rendered
     assert "private-input" not in rendered and value_token not in rendered
 
@@ -623,14 +628,15 @@ def test_no_otel_message_text_reaches_the_dataset(tmp_path, monkeypatch):
     raw = gzip.decompress(LEANGETIC_FILE.read_bytes())
     assert hashlib.sha256(raw).hexdigest() == LEANGETIC_SHA256
     marked = tmp_path / "otlp-traces.jsonl"
-    marked.write_text("\n".join(_with_message_text(line) for line in raw.decode().splitlines()) + "\n")
-    assert marked.read_text().count(MESSAGE_MARKER) > 1000  # every LLM span carries it
+    marked.write_text("\n".join(_with_message_text(line) for line in raw.decode().splitlines()) + "\n",
+                      encoding="utf-8")
+    assert marked.read_text(encoding="utf-8").count(MESSAGE_MARKER) > 1000  # every LLM span carries it
 
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     out = tmp_path / "ready"
     assert cli.main(["prepare", str(marked), "-o", str(out)]) == 0
     manifest, events = validate(out)
     assert manifest["events"] > 1000 and any(e["event_type"] == "decision" for e in events)
-    written = "".join(p.read_text() for p in sorted(out.iterdir()))
+    written = "".join(p.read_text(encoding="utf-8") for p in sorted(out.iterdir()))
     for form in canary_forms(MESSAGE_MARKER):
         assert form not in written, f"message text leaked as {form!r}"

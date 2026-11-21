@@ -258,14 +258,37 @@ def test_server_origin_accepts_the_site_and_a_local_check():
 
 def test_stopping_the_app_deletes_the_files_it_copied(tmp_path):
     env = {**os.environ, "TMPDIR": str(tmp_path), "XDG_DATA_HOME": str(tmp_path / "data")}
+    # Windows has no SIGTERM to catch (send_signal(SIGTERM) ends the process outright); Ctrl-Break
+    # arrives as SIGBREAK, which needs the app in its own process group. Closing the console window
+    # is the next test.
+    windows = os.name == "nt"
     proc = subprocess.Popen([sys.executable, "-m", "profiler_client.cli", "app", "--no-browser"],
-                            stdout=subprocess.PIPE, text=True, env=env)
+                            stdout=subprocess.PIPE, text=True, env=env, encoding="utf-8",
+                            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if windows else 0)
     try:
         assert re.search(r"http://127\.0\.0\.1:\d+/\?t=", proc.stdout.readline() + proc.stdout.readline()
                          + proc.stdout.readline())
         assert len(list(tmp_path.glob("profiler-client-app-*"))) == 1
-        proc.send_signal(signal.SIGTERM)
+        proc.send_signal(signal.CTRL_BREAK_EVENT if windows else signal.SIGTERM)
         assert proc.wait(timeout=30) == 0
     finally:
         proc.kill()
     assert not list(tmp_path.glob("profiler-client-app-*"))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="console close events exist on Windows only")
+def test_on_windows_closing_the_console_window_deletes_the_files_it_copied(tmp_path):
+    # Windows can't send CTRL_CLOSE_EVENT to a test, so call the handler the app registers
+    # as Windows would; it must delete the folder itself, since the process ends when it returns
+    import ctypes
+    workdir = tmp_path / "profiler-client-app-x"
+    workdir.mkdir()
+    (workdir / "trace.jsonl").write_text("{}", encoding="utf-8")
+    handler = app.delete_on_console_close(workdir)
+    try:
+        assert handler(0) == 0 and handler(1) == 0  # Ctrl-C and Ctrl-Break go on to Python
+        assert workdir.exists()
+        assert handler(2) == 0  # CTRL_CLOSE_EVENT
+        assert not workdir.exists()
+    finally:
+        ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, False)

@@ -7,8 +7,8 @@ as a file name and as tool output gives different pseudonyms.
 
 The key never leaves the machine and is never written next to the
 prepared data. By default every ``prepare`` uses a fresh key, so two
-datasets can't be joined; a persistent key file is opt-in, for comparing
-runs over time, and losing it breaks that comparison.
+datasets can't be joined; a persistent key is opt-in, for comparing runs
+over time, and losing it breaks that comparison. ``keyfile`` keeps it.
 
 ``key_id`` names the key without revealing it, so the server can tell
 whether two datasets share a key -- and can be combined into one report --
@@ -19,17 +19,16 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 import re
-import secrets
-from pathlib import Path
 from typing import Any
+
+from .keyfile import KEY_BYTES, load_or_create_key, new_key
+
+__all__ = ["DOMAINS", "KEY_BYTES", "TOKEN", "Pseudonymizer", "canonical", "load_or_create_key", "new_key"]
 
 DOMAINS = ("id", "name", "input", "output", "model")
 
 TOKEN = re.compile(r"h:[0-9a-f]{64}")
-
-KEY_BYTES = 32
 
 
 def canonical(value: Any) -> bytes:
@@ -51,24 +50,3 @@ class Pseudonymizer:
     def key_id(self) -> str:
         """16 hex characters naming the key; equal only for the same key."""
         return hmac.new(self._key, b"key-id", hashlib.sha256).hexdigest()[:16]
-
-
-def new_key() -> bytes:
-    return secrets.token_bytes(KEY_BYTES)
-
-
-def load_or_create_key(path: Path) -> bytes:
-    """Read a persistent key, creating it (mode 0600) if it doesn't exist."""
-    if path.exists():
-        if path.stat().st_mode & 0o077:
-            raise ValueError(f"{path} is readable by other users; run: chmod 600 {path}")
-        key = bytes.fromhex(path.read_text(encoding="ascii").strip())
-        if len(key) < KEY_BYTES:
-            raise ValueError(f"{path} holds a key shorter than {KEY_BYTES} bytes")
-        return key
-    path.parent.mkdir(parents=True, exist_ok=True)
-    key = new_key()
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w", encoding="ascii") as f:
-        f.write(key.hex() + "\n")
-    return key

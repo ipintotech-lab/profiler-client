@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import os
 import re
 import secrets
 import shutil
@@ -340,10 +341,43 @@ def _stop(signum, frame):
     raise KeyboardInterrupt  # so a plain kill also deletes the copied files
 
 
+# CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT (the last two probably never arrive; see below)
+CONSOLE_CLOSE_EVENTS = (2, 5, 6)
+
+
+def delete_on_console_close(workdir: Path):
+    """Windows: delete ``workdir`` when the console window is closed.
+
+    Windows ends the process as soon as the console handlers return for a
+    close, before Python's signal handlers and ``finally`` blocks run, so the
+    files are deleted in the handler itself. Ctrl-C and Ctrl-Break are passed
+    on to Python, whose cleanup in ``serve`` deletes them. Sign-out and
+    shutdown are handled the same way if they arrive, but they are probably
+    not delivered once the browser has been opened: Windows doesn't send them
+    to a console program that has loaded user32.dll (#58). The caller keeps
+    the returned handler alive.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+    def handler(event):
+        if event in CONSOLE_CLOSE_EVENTS:
+            shutil.rmtree(workdir, ignore_errors=True)
+        return False
+
+    if not ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, True):
+        raise ctypes.WinError()
+    return handler
+
+
 def serve(server: str, port: int = 0, open_browser: bool = True) -> None:
     origin = server_origin(server)
     signal.signal(signal.SIGTERM, _stop)
+    if hasattr(signal, "SIGBREAK"):  # Windows: Ctrl-Break
+        signal.signal(signal.SIGBREAK, _stop)
     workdir = Path(tempfile.mkdtemp(prefix="profiler-client-app-"))  # mode 0700
+    _on_close = delete_on_console_close(workdir) if os.name == "nt" else None  # kept alive while serving
     try:
         httpd = AppServer(port, Session(workdir, origin))
         print(f"profiler-client app, sending to {origin}\n\n  {httpd.url}\n\n"

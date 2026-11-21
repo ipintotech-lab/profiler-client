@@ -1,8 +1,16 @@
 import base64
 import json
+import os
 import urllib.parse
 
 import pytest
+
+# Windows has no Unix file modes (stat reports 0o666 for every file), so a test that a file is
+# owner-only (0600) has nothing to check there; the key file is checked on Windows by
+# test_keyfile's DPAPI tests instead
+UNIX_MODES = pytest.mark.skipif(os.name == "nt", reason="Windows has no Unix file modes to check")
+# creating a symlink on Windows needs administrator rights or Developer Mode
+SYMLINKS = pytest.mark.skipif(os.name == "nt", reason="creating a symlink on Windows needs administrator rights")
 
 # Strings that must never appear in a prepared dataset, in any form.
 CANARIES = [
