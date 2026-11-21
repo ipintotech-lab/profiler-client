@@ -107,6 +107,22 @@ def test_on_windows_a_failed_encryption_keeps_the_plain_key_file(tmp_path, fake_
     assert "couldn't be encrypted" in notes[0] and "tried again" in notes[0]
 
 
+def test_on_windows_a_key_that_stays_unencrypted_is_reported_on_every_run(tmp_path, transcript_file, fake_windows,
+                                                                          monkeypatch, capsys):
+    path, before = _plain_key_file(tmp_path)
+
+    def fail(*args):
+        raise OSError(5, "access denied")
+    monkeypatch.setattr(keyfile.os, "replace", fail)
+    for run in ("one", "two"):
+        out = tmp_path / run
+        assert cli.main(["prepare", str(transcript_file), "-o", str(out), "--key-file", str(path),
+                         "--no-name-list"]) == 0
+        err = capsys.readouterr().err
+        assert f"{path} holds the key unencrypted and couldn't be encrypted" in err and KEY.hex() not in err
+    assert path.read_bytes() == before
+
+
 def test_on_windows_an_interrupted_encryption_leaves_the_plain_key_file(tmp_path, fake_windows, monkeypatch):
     """Ctrl+C or a crash while the encrypted copy is written: the original
     file is only ever replaced by a rename, so it is still whole."""
