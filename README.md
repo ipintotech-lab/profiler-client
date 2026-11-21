@@ -41,7 +41,10 @@ report and shows it with your names restored, as `open` does. It listens on
 one-time token that the page swaps for a cookie; any other host, origin or
 request without that cookie is refused. The token you paste is held in memory
 only. Your files are copied to a temporary folder that is deleted after
-preparing, and everything else is deleted when you stop the app (Ctrl-C).
+preparing, and everything else is deleted when the app exits (Ctrl-C). An
+app that is interrupted, for example killed, or on Windows ended by a sign-out
+or shutdown, can leave the folder behind; deleting it at the next start is
+planned ([#58](https://github.com/ipintotech-lab/profiler-client/issues/58)).
 `--server` picks another Openly7 address, `--port` a fixed port and
 `--no-browser` just prints the address.
 

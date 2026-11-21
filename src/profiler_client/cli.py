@@ -68,6 +68,10 @@ def _note(text: str) -> None:
     print(f"note: {text}", file=sys.stderr)
 
 
+def _warn(text: str) -> None:
+    print(f"warning: {text}", file=sys.stderr)
+
+
 def _given_key(args: argparse.Namespace) -> bytes | None:
     """The key from --key-env, --key-command or --key-file (at most one can
     be given), or None for a fresh key."""
@@ -76,7 +80,7 @@ def _given_key(args: argparse.Namespace) -> bytes | None:
     if args.key_command:
         return key_from_command(args.key_command)
     if args.key_file:
-        return load_or_create_key(Path(args.key_file).expanduser(), note=_note)
+        return load_or_create_key(Path(args.key_file).expanduser(), note=_note, warn=_warn)
     return None
 
 

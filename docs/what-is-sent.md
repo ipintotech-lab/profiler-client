@@ -46,7 +46,7 @@ your names on this machine.
 
 It never sends:
 
-- the trace files you choose (they are copied into a temporary folder on this machine and deleted when the app stops);
+- the trace files you choose (they are copied into a temporary folder on this machine and deleted when the app exits; an interrupted app, for example one killed, or on Windows ended by a sign-out or shutdown, can leave the folder behind, and deleting it at the next start is planned, [#58](https://github.com/ipintotech-lab/profiler-client/issues/58));
 - `manifest.json`;
 - the name list;
 - the event references.

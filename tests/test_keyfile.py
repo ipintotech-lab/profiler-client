@@ -100,11 +100,11 @@ def test_on_windows_a_failed_encryption_keeps_the_plain_key_file(tmp_path, fake_
     def fail(*args):
         raise OSError(5, "access denied")
     monkeypatch.setattr(keyfile.os, step, fail)
-    notes = []
-    assert load_or_create_key(path, note=notes.append) == KEY
+    warnings = []
+    assert load_or_create_key(path, warn=warnings.append) == KEY
     assert path.read_bytes() == before
     assert [p.name for p in tmp_path.iterdir()] == ["key"]
-    assert "couldn't be encrypted" in notes[0] and "tried again" in notes[0]
+    assert "couldn't be encrypted" in warnings[0] and "tried again" in warnings[0]
 
 
 def test_on_windows_a_key_that_stays_unencrypted_is_reported_on_every_run(tmp_path, transcript_file, fake_windows,
@@ -119,7 +119,7 @@ def test_on_windows_a_key_that_stays_unencrypted_is_reported_on_every_run(tmp_pa
         assert cli.main(["prepare", str(transcript_file), "-o", str(out), "--key-file", str(path),
                          "--no-name-list"]) == 0
         err = capsys.readouterr().err
-        assert f"{path} holds the key unencrypted and couldn't be encrypted" in err and KEY.hex() not in err
+        assert f"warning: {path} holds the key unencrypted and couldn't be encrypted" in err and KEY.hex() not in err
     assert path.read_bytes() == before
 
 
@@ -140,9 +140,9 @@ def test_on_windows_an_interrupted_encryption_leaves_the_plain_key_file(tmp_path
 def test_on_windows_an_encrypted_copy_that_doesnt_decrypt_is_never_kept(tmp_path, fake_windows, monkeypatch):
     path, before = _plain_key_file(tmp_path)
     monkeypatch.setattr(keyfile, "_dpapi", lambda data, protect: b"x" + data if protect else data)
-    notes = []
-    assert load_or_create_key(path, note=notes.append) == KEY
-    assert path.read_bytes() == before and "didn't decrypt to the same key" in notes[0]
+    warnings = []
+    assert load_or_create_key(path, warn=warnings.append) == KEY
+    assert path.read_bytes() == before and "didn't decrypt to the same key" in warnings[0]
     assert [p.name for p in tmp_path.iterdir()] == ["key"]
 
 def test_on_windows_a_key_another_account_made_is_an_error_not_a_new_key(tmp_path, fake_windows):

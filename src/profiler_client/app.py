@@ -341,17 +341,21 @@ def _stop(signum, frame):
     raise KeyboardInterrupt  # so a plain kill also deletes the copied files
 
 
-# CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT
+# CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT (the last two probably never arrive; see below)
 CONSOLE_CLOSE_EVENTS = (2, 5, 6)
 
 
 def delete_on_console_close(workdir: Path):
-    """Windows: delete ``workdir`` when the console window is closed, or the user signs out or shuts down.
+    """Windows: delete ``workdir`` when the console window is closed.
 
-    For these events Windows ends the process as soon as the console handlers
-    return, before Python's signal handlers and ``finally`` blocks run, so the
+    Windows ends the process as soon as the console handlers return for a
+    close, before Python's signal handlers and ``finally`` blocks run, so the
     files are deleted in the handler itself. Ctrl-C and Ctrl-Break are passed
-    on to Python. The caller keeps the returned handler alive.
+    on to Python, whose cleanup in ``serve`` deletes them. Sign-out and
+    shutdown are handled the same way if they arrive, but they are probably
+    not delivered once the browser has been opened: Windows doesn't send them
+    to a console program that has loaded user32.dll (#58). The caller keeps
+    the returned handler alive.
     """
     import ctypes
     from ctypes import wintypes

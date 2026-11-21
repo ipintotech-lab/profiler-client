@@ -128,7 +128,8 @@ def _replace(path: Path, text: str) -> None:
         raise
 
 
-def _encrypt_in_place(path: Path, key: bytes, note: Callable[[str], None] | None) -> None:
+def _encrypt_in_place(path: Path, key: bytes, note: Callable[[str], None] | None,
+                      warn: Callable[[str], None] | None) -> None:
     """Replace a plain key file on Windows with the encrypted one. The
     encrypted copy must decrypt to the same key before it replaces the file,
     and any failure keeps the plain file as it was, to be tried again."""
@@ -138,8 +139,8 @@ def _encrypt_in_place(path: Path, key: bytes, note: Callable[[str], None] | None
             raise OSError(0, "the encrypted copy didn't decrypt to the same key")
         _replace(path, text)
     except OSError as exc:
-        if note:
-            note(f"{path} holds the key unencrypted and couldn't be encrypted ({exc.strerror or exc}); it is "
+        if warn:
+            warn(f"{path} holds the key unencrypted and couldn't be encrypted ({exc.strerror or exc}); it is "
                  "used as it is and encrypting it is tried again next time")
         return
     if note:
@@ -153,8 +154,10 @@ def write_key_file(path: Path, key: bytes) -> None:
     _write_new(path, _encode(key))
 
 
-def load_or_create_key(path: Path, note: Callable[[str], None] | None = None) -> bytes:
-    """Read a persistent key, creating it if it doesn't exist."""
+def load_or_create_key(path: Path, note: Callable[[str], None] | None = None,
+                       warn: Callable[[str], None] | None = None) -> bytes:
+    """Read a persistent key, creating it if it doesn't exist. ``note`` gets
+    information, ``warn`` a key that stays unencrypted on Windows."""
     if not path.exists():
         key = new_key()
         write_key_file(path, key)
@@ -183,7 +186,7 @@ def load_or_create_key(path: Path, note: Callable[[str], None] | None = None) ->
         return _hex_key(key.hex(), str(path))
     if WINDOWS:
         key = _hex_key(text, str(path))
-        _encrypt_in_place(path, key, note)
+        _encrypt_in_place(path, key, note, warn)
         return key
     if path.stat().st_mode & 0o077:
         raise KeyUnavailable(f"{path} is readable by other users; run: chmod 600 {path}")
