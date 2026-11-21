@@ -258,13 +258,17 @@ def test_server_origin_accepts_the_site_and_a_local_check():
 
 def test_stopping_the_app_deletes_the_files_it_copied(tmp_path):
     env = {**os.environ, "TMPDIR": str(tmp_path), "XDG_DATA_HOME": str(tmp_path / "data")}
+    # Windows has no SIGTERM to catch (send_signal(SIGTERM) ends the process outright); Ctrl-Break and
+    # closing the console window arrive as SIGBREAK, which needs the app in its own process group
+    windows = os.name == "nt"
     proc = subprocess.Popen([sys.executable, "-m", "profiler_client.cli", "app", "--no-browser"],
-                            stdout=subprocess.PIPE, text=True, env=env, encoding="utf-8")
+                            stdout=subprocess.PIPE, text=True, env=env, encoding="utf-8",
+                            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if windows else 0)
     try:
         assert re.search(r"http://127\.0\.0\.1:\d+/\?t=", proc.stdout.readline() + proc.stdout.readline()
                          + proc.stdout.readline())
         assert len(list(tmp_path.glob("profiler-client-app-*"))) == 1
-        proc.send_signal(signal.SIGTERM)
+        proc.send_signal(signal.CTRL_BREAK_EVENT if windows else signal.SIGTERM)
         assert proc.wait(timeout=30) == 0
     finally:
         proc.kill()

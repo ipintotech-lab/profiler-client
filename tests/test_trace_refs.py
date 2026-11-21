@@ -4,6 +4,7 @@ import json
 import os
 
 import pytest
+from conftest import UNIX_MODES
 from test_formats import FORMATS
 
 from profiler_client import cli
@@ -84,6 +85,7 @@ def test_an_unknown_event_or_dataset_is_refused(tmp_path, monkeypatch, capsys, t
     assert code == 1 and "no event references" in err
 
 
+@UNIX_MODES
 def test_refs_are_private_skipped_without_a_name_list_and_forgotten(tmp_path, monkeypatch, capsys, transcript_file):
     _, report, events, _, digest = _prepare(tmp_path, monkeypatch, "claude-code", transcript_file)
     refs = tmp_path / "data" / "profiler-client" / "refs" / f"{digest}.json"

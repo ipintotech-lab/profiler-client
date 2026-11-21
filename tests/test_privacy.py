@@ -6,7 +6,7 @@ import socket
 from pathlib import Path
 
 import pytest
-from conftest import CANARIES, canary_forms
+from conftest import CANARIES, SYMLINKS, UNIX_MODES, canary_forms
 
 from profiler_client import cli
 from profiler_client.claude_code import convert_claude_code_transcript
@@ -108,6 +108,7 @@ def test_a_resealed_dataset_still_has_to_pass_the_lint():
     assert "Acme" not in str(exc.value)
 
 
+@SYMLINKS
 def test_symlinks_and_other_formats_are_refused(tmp_path, transcript_file):
     link = tmp_path / "link.jsonl"
     link.symlink_to(transcript_file)
@@ -126,6 +127,7 @@ def test_errors_never_quote_file_content(tmp_path, capsys):
     assert "ACME_TOKEN_9f8e7d" not in capsys.readouterr().err
 
 
+@UNIX_MODES
 def test_key_file_is_private(tmp_path):
     path = tmp_path / "cfg" / "key"
     key = load_or_create_key(path)
@@ -136,6 +138,7 @@ def test_key_file_is_private(tmp_path):
         load_or_create_key(path)
 
 
+@UNIX_MODES
 def test_name_list_contains_names_but_never_inputs_outputs_or_ids(tmp_path):
     names = Names(Pseudonymizer(b"n" * 32))
     names.step("workflow-name")
@@ -159,6 +162,7 @@ def test_name_list_contains_names_but_never_inputs_outputs_or_ids(tmp_path):
     assert os.stat(path).st_mode & 0o777 == 0o600
 
 
+@UNIX_MODES
 def test_prepare_writes_seal_hash_name_list_unless_disabled(tmp_path, transcript_file, monkeypatch):
     data_home = tmp_path / "data"
     monkeypatch.setenv("XDG_DATA_HOME", str(data_home))
@@ -178,6 +182,7 @@ def test_prepare_writes_seal_hash_name_list_unless_disabled(tmp_path, transcript
     assert list(name_path.parent.iterdir()) == [name_path]
 
 
+@UNIX_MODES
 def test_open_restores_names_from_matching_payload_hash(tmp_path, monkeypatch):
     payload_hash = "b" * 64
     workflow_token = "h:" + "1" * 64

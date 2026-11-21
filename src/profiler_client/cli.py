@@ -23,6 +23,7 @@ from pathlib import Path
 from . import __version__, policy
 from .contract import CONTRACT_VERSION, TraceEvent
 from .dataset import EVENTS, PrepareError, convert_file, prepare, read_sealed, subagents_across, summary, validate
+from .keyfile import key_from_command, key_from_env
 from .names import Names
 from .pseudonym import TOKEN, Pseudonymizer, load_or_create_key, new_key
 from .readiness import readiness, remediation, workflows
@@ -37,11 +38,14 @@ DEFAULT_SERVER = "https://openly7.com"
 
 
 def prepare_dataset(paths: list[Path], output: Path, *, keep_names: bool = False, llm_inputs: bool = False,
-                    key_file: str | None = None, name_list: bool = True) -> tuple[dict, list[dict]]:
+                    key_file: str | None = None, name_list: bool = True,
+                    key: bytes | None = None) -> tuple[dict, list[dict]]:
     """``prepare``: write the dataset to ``output`` and, unless
     ``name_list`` is False, keep its name list and event references on this
-    machine. Returns the manifest and the events."""
-    key = load_or_create_key(Path(key_file).expanduser()) if key_file else new_key()
+    machine. Returns the manifest and the events. The key is ``key``, else
+    the one kept in ``key_file``, else a fresh one."""
+    if key is None:
+        key = load_or_create_key(Path(key_file).expanduser()) if key_file else new_key()
     names = Names(Pseudonymizer(key), keep=keep_names, llm_inputs=llm_inputs)
     refs = {} if name_list else None
     manifest = prepare(paths, output, names, refs)
@@ -60,13 +64,30 @@ def prepare_check(manifest: dict, events: list[dict], files: int) -> str:
                         **report, "remediation": remediation(report, prices=False)})
 
 
+def _note(text: str) -> None:
+    print(f"note: {text}", file=sys.stderr)
+
+
+def _given_key(args: argparse.Namespace) -> bytes | None:
+    """The key from --key-env, --key-command or --key-file (at most one can
+    be given), or None for a fresh key."""
+    if args.key_env:
+        return key_from_env(args.key_env)
+    if args.key_command:
+        return key_from_command(args.key_command)
+    if args.key_file:
+        return load_or_create_key(Path(args.key_file).expanduser(), note=_note)
+    return None
+
+
 def _prepare(args: argparse.Namespace) -> int:
     paths = [Path(p) for p in args.files]
+    key = _given_key(args)
     print("reading:", file=sys.stderr)
     for p in paths:
         print(f"  {p}", file=sys.stderr)
     manifest, events = prepare_dataset(paths, Path(args.output), keep_names=args.keep_names,
-                                       llm_inputs=args.llm_inputs, key_file=args.key_file,
+                                       llm_inputs=args.llm_inputs, key=key,
                                        name_list=not args.no_name_list)
     print(f"wrote {manifest['events']} events from {manifest['sessions']} session(s) "
           f"({manifest['source_format']}) to {args.output}", file=sys.stderr)
@@ -77,7 +98,7 @@ def _prepare(args: argparse.Namespace) -> int:
         print(f"note: {manifest['sessions_without_cost']} session(s) recorded no cost; their cost shows as 0",
               file=sys.stderr)
     print("\n" + prepare_check(manifest, events, len(paths)), file=sys.stderr)
-    if not args.key_file:
+    if key is None:
         print("note: a fresh key was used and not kept, so this dataset can't be linked to any other", file=sys.stderr)
     return 0
 
@@ -325,7 +346,13 @@ def main(argv: list[str] | None = None) -> int:
                                             "OpenAI chat trajectories or your own event log (JSON or JSONL); "
                                             "directories and symlinks are refused")
     p.add_argument("-o", "--output", required=True, help="new or empty directory to write the dataset to")
-    p.add_argument("--key-file", help="keep and reuse a key here (mode 0600), to compare datasets over time")
+    keys = p.add_mutually_exclusive_group()
+    keys.add_argument("--key-file", help="keep and reuse a key here, to compare datasets over time (mode 0600; "
+                                         "on Windows, encrypted for your Windows account)")
+    keys.add_argument("--key-env", metavar="VAR", help="read the key, in hex, from this environment variable")
+    keys.add_argument("--key-command", metavar="COMMAND",
+                      help="run this command (no shell) and read the key, in hex, from its output, e.g. from a "
+                           "secret store")
     p.add_argument("--keep-names", action="store_true",
                    help="keep your workflow, agent, node and tool names readable (single words only); "
                         "inspect lists every kept name")

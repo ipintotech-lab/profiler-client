@@ -343,6 +343,8 @@ def _stop(signum, frame):
 def serve(server: str, port: int = 0, open_browser: bool = True) -> None:
     origin = server_origin(server)
     signal.signal(signal.SIGTERM, _stop)
+    if hasattr(signal, "SIGBREAK"):  # Windows: Ctrl-Break, and closing the console window
+        signal.signal(signal.SIGBREAK, _stop)
     workdir = Path(tempfile.mkdtemp(prefix="profiler-client-app-"))  # mode 0700
     try:
         httpd = AppServer(port, Session(workdir, origin))
