@@ -164,7 +164,7 @@ def test_dpapi_keeps_the_key_encrypted_for_this_account(tmp_path):
     text = path.read_text(encoding="ascii")
     assert text.startswith(DPAPI_HEADER + "\n") and key.hex() not in text.lower()
     assert load_or_create_key(path) == key
-    # without the client's entropy, DPAPI refuses the same blob
+    # the blob is bound to the client's label (not a secret; see DPAPI_ENTROPY)
     import base64
     blob = base64.b64decode(text.split("\n")[1])
     with pytest.raises(OSError):

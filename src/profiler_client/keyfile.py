@@ -34,8 +34,9 @@ KEY_BYTES = 32
 
 WINDOWS = os.name == "nt"
 DPAPI_HEADER = "profiler-client key dpapi v1"
-# mixed into DPAPI, so another program running as the same user can't
-# decrypt the blob by calling CryptUnprotectData without it
+# Labels the blob as this client's. It is not a secret and protects nothing:
+# it ships with the client, so any program running as this Windows account
+# can pass it too. The Windows account is what protects the key.
 DPAPI_ENTROPY = b"profiler-client key v1"
 
 COMMAND_TIMEOUT_S = 60
