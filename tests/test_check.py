@@ -127,17 +127,17 @@ def test_duplicate_work_between_agents_needs_tool_arguments_agent_names_and_runs
     _, out = _check(capsys, _log(tmp_path))
     row = next(f for f in out["findings_possible"] if f["key"] == "between_agents")
     assert row["status"] == "no" and row["reason"] == "only one agent calls tools"
-    log = json.loads(_log(tmp_path).read_text())
+    log = json.loads(_log(tmp_path).read_text(encoding="utf-8"))
     for i, e in enumerate(log["events"]):  # two runs become one: kyc's half, then credit's
         e["agent"] = ["kyc", "credit"][i // 2 % 2]
         e["runId"] = f"acme-run-{i // 4}"
     two = tmp_path / "two.json"
-    two.write_text(json.dumps(log))
+    two.write_text(json.dumps(log), encoding="utf-8")
     _, out = _check(capsys, two)
     assert _found(out)["between_agents"] == "yes"
     for e in log["events"]:  # each agent's calls under its own run id
         e["runId"] = f"{e['runId']}-{e['agent']}"
-    two.write_text(json.dumps(log))
+    two.write_text(json.dumps(log), encoding="utf-8")
     _, out = _check(capsys, two)
     row = next(f for f in out["findings_possible"] if f["key"] == "between_agents")
     assert row["status"] == "no" and "run id" in row["reason"]

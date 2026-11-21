@@ -42,7 +42,7 @@ let input = ''; process.stdin.on('data', d => { input += d; }).on('end', () => {
 def _render(report: dict, *host: str, click: dict | None = None) -> dict:
     env = {**os.environ, "CLICK": json.dumps(click)} if click else None
     out = subprocess.run(["node", "-e", HARNESS, str(JS), *host], input=json.dumps(report), capture_output=True,
-                         text=True, check=True, env=env)
+                         text=True, check=True, env=env, encoding="utf-8")
     return json.loads(out.stdout)
 
 
