@@ -1,6 +1,9 @@
+import gzip
+import hashlib
 import json
 import os
 import socket
+from pathlib import Path
 
 import pytest
 from conftest import CANARIES, canary_forms
@@ -573,3 +576,61 @@ def test_open_keeps_an_overviews_rows_and_each_workflows_report_with_names_resto
     rendered = output.read_text()
     assert rendered.count("fraud-screening") >= 3 and wf_token not in rendered
     assert "private-input" not in rendered and value_token not in rendered
+
+
+# One of the 30 OTLP files of the Leangetic comparison (agents_profiler
+# benchmarks/leangetic-compare/input-SHA256SUMS), byte for byte, gzipped.
+LEANGETIC_FILE = Path(__file__).parent / "data" / "leangetic-input" / "otlp-traces-2026-10-03.jsonl.gz"
+LEANGETIC_SHA256 = "161520e4977cc1877c6c4f0c87d552cab151b84fe182cd103ca4726f57ac9824"
+MESSAGE_MARKER = "zq7-message-text-must-not-leave"
+
+
+def _with_message_text(line: str) -> str:
+    """The export line with message text on every LLM span: the system prompt
+    (``gen_ai.system_instructions``), the input messages
+    (``gen_ai.input.messages``, system and user) and a text part in the output
+    messages, each carrying the marker."""
+    doc = json.loads(line)
+    for resource in doc["resourceSpans"]:
+        for scope in resource["scopeSpans"]:
+            for span in scope["spans"]:
+                attrs = {a["key"]: a for a in span["attributes"]}
+                if attrs.get("gen_ai.operation.name", {}).get("value", {}).get("stringValue") != "chat":
+                    continue
+                inputs = [{"role": "system", "parts": [{"type": "text", "content": f"{MESSAGE_MARKER} system prompt"}]},
+                          {"role": "user", "parts": [{"type": "text", "content": f"{MESSAGE_MARKER} user message"}]}]
+                span["attributes"] += [
+                    {"key": "gen_ai.system_instructions",
+                     "value": {"stringValue": json.dumps([{"type": "text", "content": f"{MESSAGE_MARKER} instructions"}])}},
+                    {"key": "gen_ai.input.messages", "value": {"stringValue": json.dumps(inputs)}},
+                ]
+                text = {"type": "text", "content": f"{MESSAGE_MARKER} assistant text"}
+                if "gen_ai.output.messages" in attrs:
+                    out = attrs["gen_ai.output.messages"]["value"]
+                    messages = json.loads(out["stringValue"])
+                    messages[0]["parts"].append(text)
+                    out["stringValue"] = json.dumps(messages)
+                else:
+                    span["attributes"].append({"key": "gen_ai.output.messages", "value": {"stringValue": json.dumps(
+                        [{"role": "assistant", "parts": [text], "finish_reason": "stop"}])}})
+    return json.dumps(doc)
+
+
+def test_no_otel_message_text_reaches_the_dataset(tmp_path, monkeypatch):
+    """Message text never leaves on OpenTelemetry: one of the comparison's
+    real-shaped files with a system prompt, input messages and output text
+    on every LLM span, prepared with the default options."""
+    raw = gzip.decompress(LEANGETIC_FILE.read_bytes())
+    assert hashlib.sha256(raw).hexdigest() == LEANGETIC_SHA256
+    marked = tmp_path / "otlp-traces.jsonl"
+    marked.write_text("\n".join(_with_message_text(line) for line in raw.decode().splitlines()) + "\n")
+    assert marked.read_text().count(MESSAGE_MARKER) > 1000  # every LLM span carries it
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    out = tmp_path / "ready"
+    assert cli.main(["prepare", str(marked), "-o", str(out)]) == 0
+    manifest, events = validate(out)
+    assert manifest["events"] > 1000 and any(e["event_type"] == "decision" for e in events)
+    written = "".join(p.read_text() for p in sorted(out.iterdir()))
+    for form in canary_forms(MESSAGE_MARKER):
+        assert form not in written, f"message text leaked as {form!r}"
