@@ -351,7 +351,7 @@ function renderMap(q, data, all = false) {
   const present = Object.keys(MARK).filter(k => [...marks.values()].some(m => m.kinds.has(k)));
   const drawnKinds = Object.keys(LINK_KIND).filter(k => links.some(e => e.kind === k && e.from !== e.to && at.has(e.from) && at.has(e.to)));
   q('map').innerHTML = (present.length ? `<p class="legend marks">${present.map(k => `<span><i class="pill ${k}">${esc(MARK[k].badge)}</i>${esc(MARK[k].legend)}</span>`).join('')}` +
-    '<span>Select a marked step to see its rows in the table</span></p>' : '') + `<div class="mapscroll"><svg viewBox="0 0 ${width} ${height}" style="min-width:${Math.round(width * MAP_MIN_SCALE)}px" role="img" aria-label="${esc(`Workflow map: ${plural(shown.length, 'step')}${banded ? ` in ${plural(bands.length, 'agent')}` : ''} and ${plural(paths.length, 'link')} across ${plural(graph.run_count, 'run')}`)}">` +
+    '<span>Select a marked step to see its rows in the table</span></p>' : '') + `<div class="mapscroll"><svg viewBox="0 0 ${width} ${height}" style="min-width:${Math.round(width * MAP_MIN_SCALE)}px" role="group" aria-label="${esc(`Workflow map: ${plural(shown.length, 'step')}${banded ? ` in ${plural(bands.length, 'agent')}` : ''} and ${plural(paths.length, 'link')} across ${plural(graph.run_count, 'run')}`)}">` +
     `<defs><marker id="mapArrow" ${ARROW}><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker>` +
     `<marker id="mapArrowHot" ${ARROW}><path class="arrow hot" d="M0,0 L10,5 L0,10 z"/></marker></defs>` +
     bandRects.join('') + paths.join('') + nodes.join('') + '</svg></div>' + more +
@@ -631,7 +631,7 @@ function renderRisks(q, totals, labels = {}) {
   q('risks').innerHTML = RISK_TILES.map(([risk, name, act]) => {
     const t = totals[risk] || { count: 0, saving: 0 };
     const figure = risk === 'high' ? '' : `<p class="fig">${t.saving ? `${money(t.saving)} <span class="k">in this dataset</span>` : 'No saving counted'}</p>`;
-    return `<li class="tile" data-risk="${risk}"><h4>${esc(name || labels[risk] || risk)}</h4>` +
+    return `<li class="tile" data-risk="${risk}"><h3>${esc(name || labels[risk] || risk)}</h3>` +
       (name && labels[risk] ? `<p class="k">${esc(labels[risk])}</p>` : '') +
       `${figure}<p>${plural(t.count, 'finding')}${inHeadline(t)}</p>${t.count ? `<p class="k">${esc(act)}</p>` : ''}</li>`;
   }).join('');
@@ -939,7 +939,7 @@ function renderAgentMap(q, data, m) {
   q('map').innerHTML = `<div class="agentmap"><div class="ammap mapscroll"><svg viewBox="0 0 ${L.width} ${L.height}" style="max-width:${L.width}px;min-width:${Math.round(L.width * MAP_MIN_SCALE)}px" ` +
     `role="group" aria-label="${esc(`Agent map: ${plural(ag.agents.length, 'agent')} and ${plural(ag.decisions.length, 'decision')} between them, across ${plural(runs, 'run')}`)}">` +
     `<defs><marker id="amArrow" ${ARROW}><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs>` +
-    frames.join('') + routes.map(r => r[0]).join('') + boxes.join('') + routes.map(r => r[1]).join('') + `</svg></div>${legend}${buttons}<aside class="ampanel" data-r="amPanel" aria-live="polite"></aside></div>`;
+    frames.join('') + routes.map(r => r[0]).join('') + boxes.join('') + routes.map(r => r[1]).join('') + `</svg></div>${legend}${buttons}<div class="ampanel" data-r="amPanel" aria-live="polite"></div></div>`;
   q('mapWhy').textContent = 'Each box is one agent, or one LLM call that decides which agent runs next. ' +
     'Links come from the trace: which result a decision read, and which agent it started. A % on a link is the share of runs reaching where it starts that take it.';
 }
