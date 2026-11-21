@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e '.[dev]' ruff
-      - run: ruff check src tests
+      - run: ruff check src tests scripts
       - run: pytest -q
 
   test-windows:
@@ -36,6 +36,28 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e '.[dev]'
       - run: pytest -q -rs
+
+  smoke-windows:
+    # the installed command as a user runs it on Windows: a regular (not editable) install,
+    # profiler-client.exe from PowerShell and cmd with the console's own code page, paths with
+    # spaces and non-ASCII letters, a DPAPI key file, and the app started and stopped with Ctrl-Break
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.13"]
+        shell: [pwsh, cmd]
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install .
+      - run: python scripts/cli_smoke.py
 
   telemetry-e2e:
     runs-on: ubuntu-latest

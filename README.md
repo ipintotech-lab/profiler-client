@@ -199,6 +199,11 @@ The tests feed canary strings through every converter (raw, base64,
 URL-encoded, hex and JSON-escaped) and fail if any of them shows up in the
 output. They also run every command with sockets disabled.
 
+`python scripts/cli_smoke.py` runs the installed `profiler-client` command end
+to end as a user would (check, prepare with a key file, validate, inspect,
+forget, and the app started and stopped). CI runs it on Windows, from
+PowerShell and cmd, after a regular `pip install .`.
+
 ## Terms
 
 The full terms and privacy notes are at
