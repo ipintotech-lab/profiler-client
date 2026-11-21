@@ -455,7 +455,7 @@ def test_open_keeps_only_the_event_ids_a_map_step_can_look_up(tmp_path, monkeypa
     output = tmp_path / "report.html"
     assert cli.main(["open", str(source), "-o", str(output)]) == 0
     rendered = output.read_text(encoding="utf-8")
-    assert event_id in rendered and str(source.resolve()) in rendered
+    assert event_id in rendered and json.dumps(str(source.resolve()))[1:-1] in rendered  # as JSON in the page
     assert run_id not in rendered and "not an id" not in rendered
 
 
@@ -628,14 +628,15 @@ def test_no_otel_message_text_reaches_the_dataset(tmp_path, monkeypatch):
     raw = gzip.decompress(LEANGETIC_FILE.read_bytes())
     assert hashlib.sha256(raw).hexdigest() == LEANGETIC_SHA256
     marked = tmp_path / "otlp-traces.jsonl"
-    marked.write_text("\n".join(_with_message_text(line) for line in raw.decode().splitlines()) + "\n")
-    assert marked.read_text().count(MESSAGE_MARKER) > 1000  # every LLM span carries it
+    marked.write_text("\n".join(_with_message_text(line) for line in raw.decode().splitlines()) + "\n",
+                      encoding="utf-8")
+    assert marked.read_text(encoding="utf-8").count(MESSAGE_MARKER) > 1000  # every LLM span carries it
 
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     out = tmp_path / "ready"
     assert cli.main(["prepare", str(marked), "-o", str(out)]) == 0
     manifest, events = validate(out)
     assert manifest["events"] > 1000 and any(e["event_type"] == "decision" for e in events)
-    written = "".join(p.read_text() for p in sorted(out.iterdir()))
+    written = "".join(p.read_text(encoding="utf-8") for p in sorted(out.iterdir()))
     for form in canary_forms(MESSAGE_MARKER):
         assert form not in written, f"message text leaked as {form!r}"
