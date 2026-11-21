@@ -133,7 +133,8 @@ created with mode 0600; on Windows the key is encrypted for your Windows
 account (DPAPI), so a copy is useless to another account or machine. A team
 can share one key from its secret store instead, with `--key-env VAR` or
 `--key-command COMMAND` (the key in hex, 64 characters, e.g. from
-`openssl rand -hex 32`). If you lose the key, you can
+`openssl rand -hex 32`). The command's own error output is shown on the
+terminal unchanged, so it must not print the key there. If you lose the key, you can
 no longer compare; a key that can't be read is an error, never replaced by a
 new one. [`docs/what-is-sent.md`](docs/what-is-sent.md#how-the-key-is-protected)
 says what protects the key on each system and what it doesn't. The seal records a `key_id` that

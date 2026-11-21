@@ -86,7 +86,7 @@ anywhere.
 | `--key-file` on Mac and Linux | The file holds the key in hex and must be readable only by you (mode 0600). `prepare` refuses a key file that other users can read. | An administrator of the machine (root), malware running as you, and copies of the file, such as backups. |
 | `--key-file` on Windows | The key is encrypted with Windows DPAPI for your Windows account. A copy of the file can't be decrypted by another account or on another machine. A key file that an earlier version wrote without encryption is encrypted the first time it is used. | An administrator of the machine or of your Windows domain, malware running as you, and anyone who signs in as you. |
 | `--key-env VAR` | Whatever protects that environment variable: your shell, your CI system or your secret store. | Anyone who can read your processes' environment, such as an administrator or malware running as you. |
-| `--key-command COMMAND` | The secret store the command reads from. The client runs the command without a shell, reads the key from its output and never shows that output. | Whoever can read that secret store or run the command as you. |
+| `--key-command COMMAND` | The secret store the command reads from. The client runs the command without a shell, reads the key from its output and never shows that output. The command's own error output is shown on the terminal unchanged, so the command must not print the key there. | Whoever can read that secret store or run the command as you. |
 
 Only one key option can be given. Whatever the source, the key is never
 written to the dataset, the manifest, the seal or the name list, and no
