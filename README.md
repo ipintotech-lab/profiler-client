@@ -10,11 +10,17 @@ is sent.
 
 ## Install
 
+Python 3.10 or later; the only dependency is pydantic. Install a release from
+GitHub and check the version:
+
 ```
-pip install -e .
+pip install https://github.com/ipintotech-lab/profiler-client/archive/refs/tags/v0.37.1.tar.gz
+profiler-client --version
 ```
 
-Python 3.10+; the only dependency is pydantic.
+Or download the wheel and its checksum from
+[openly7.com/client-terms](https://openly7.com/client-terms#install). To
+work on the client itself, install it from a clone (see Development).
 
 ## Use
 
@@ -28,7 +34,7 @@ profiler-client inspect analysis-ready
 profiler-client validate analysis-ready
 profiler-client open report.json
 profiler-client forget report.json   # delete the local name list for that dataset
-profiler-client version
+profiler-client version   # or profiler-client --version
 ```
 
 `app` opens a page in your browser that runs on this computer. On it you
@@ -195,6 +201,8 @@ you work.
 ## Development
 
 ```
+git clone https://github.com/ipintotech-lab/profiler-client.git
+cd profiler-client
 pip install -e '.[dev]'
 pytest
 ```
@@ -207,6 +215,12 @@ output. They also run every command with sockets disabled.
 to end as a user would (check, prepare with a key file, validate, inspect,
 forget, and the app started and stopped). CI runs it on Windows, from
 PowerShell and cmd, after a regular `pip install .`.
+
+A release is a `vX.Y.Z` tag on main, made by the `release-tag` workflow, which
+tags the version `pyproject.toml` says. Bump the version in `pyproject.toml`,
+`src/profiler_client/__init__.py` and the install line above together;
+`python scripts/check_version.py` checks they agree, and CI checks every
+pushed tag against them.
 
 ## Terms
 

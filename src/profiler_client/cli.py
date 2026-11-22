@@ -336,6 +336,16 @@ def _version(_: argparse.Namespace) -> int:
     return 0
 
 
+class _VersionAction(argparse.Action):
+    """``--version``: the same as the ``version`` command, with no command needed."""
+
+    def __init__(self, option_strings, dest, **kwargs):
+        super().__init__(option_strings, dest, nargs=0, default=argparse.SUPPRESS, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        parser.exit(_version(namespace))
+
+
 def _utf8_output() -> None:
     """Print UTF-8 whatever the console's code page. On Windows, output sent
     to a pipe or file otherwise uses the locale's code page (cp1252, cp1255,
@@ -349,6 +359,7 @@ def _utf8_output() -> None:
 def main(argv: list[str] | None = None) -> int:
     _utf8_output()
     parser = argparse.ArgumentParser(prog="profiler-client", description=__doc__.split("\n\n")[0])
+    parser.add_argument("--version", action=_VersionAction, help="print client, contract and policy versions")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("prepare", help="convert and pseudonymize transcripts into a dataset directory")

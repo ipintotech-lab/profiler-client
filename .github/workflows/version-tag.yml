@@ -1,0 +1,23 @@
+name: version-tag
+
+# A pushed vX.Y.Z tag must name the version the package says at that commit
+# (pyproject.toml, __init__.py and the README install line). The check can't
+# stop the push: when it fails, the tag is wrong and a new version replaces it.
+# release-tag.yml makes tags that always pass.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python scripts/check_version.py "$GITHUB_REF_NAME"
