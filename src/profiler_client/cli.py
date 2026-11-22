@@ -21,12 +21,13 @@ from collections import Counter
 from pathlib import Path
 
 from . import __version__, policy
+from . import prices as token_prices
 from .contract import CONTRACT_VERSION, TraceEvent
 from .dataset import EVENTS, PrepareError, convert_file, prepare, read_sealed, subagents_across, summary, validate
 from .keyfile import key_from_command, key_from_env
 from .names import Names
 from .pseudonym import TOKEN, Pseudonymizer, load_or_create_key, new_key
-from .readiness import readiness, remediation, workflows
+from .readiness import is_llm, readiness, remediation, workflows
 from .report import forget_name_lists, read_name_lists, render_html, translate, write_name_list
 from .trace_refs import original_record, read_refs, refs_dir, write_refs
 
@@ -109,22 +110,19 @@ def _prepare(args: argparse.Namespace) -> int:
 GRADE_ORDER = "ABCD"
 
 
-def _prices(text: str | None) -> tuple[float, float] | None:
-    if text is None:
-        return None
-    try:
-        given, chose = (float(x) for x in text.split(","))
-    except ValueError:
-        raise ValueError("--prices takes two numbers: IN,OUT in $ per 1M input and output tokens") from None
-    if given < 0 or chose < 0:
-        raise ValueError("token prices can't be negative")
-    return given, chose
+def _unpriced_models(events: list, prices: token_prices.Prices, names: Names) -> list[str]:
+    """The models of LLM calls with tokens and no cost that no price covers,
+    as the trace names them."""
+    keyed = token_prices.keyed(prices, names.model)
+    models = {e.model for e in events if is_llm(e) and e.cost <= 0 and e.tokens.input + e.tokens.output > 0}
+    return sorted(str(names.seen.get(m, m) if m else "(no model)") for m in models
+                  if token_prices.price_for(keyed, m) is None)
 
 
 def _check(args: argparse.Namespace) -> int:
     """Convert in memory and say what the analysis can find. Writes nothing,
     keeps no key or name list, opens no connection."""
-    prices = _prices(args.prices)
+    prices = token_prices.parse(args.prices, args.prices_file)
     names = Names(Pseudonymizer(new_key()))
     events, formats, skipped = [], Counter(), []
     paths = [Path(p) for p in args.files]
@@ -144,11 +142,19 @@ def _check(args: argparse.Namespace) -> int:
         print(json.dumps(out, indent=2) if args.json else
               f"Read none of {len(args.files)} file(s): " + ", ".join(s["code"] for s in skipped), file=sys.stdout)
         return 2
-    report = readiness(events, prices=prices is not None)
+    unpriced = _unpriced_models(events, prices, names) if prices else []
+    priced = prices is not None and not unpriced
+    report = readiness(events, prices=priced)
     if args.names:
         for w, name in zip(report["workflows"], (f["name"] for f in workflows(events))):
             w["name"] = names.seen.get(name, name)
-    out = {"readable": readable, **report, "remediation": remediation(report, prices is not None)}
+    out = {"readable": readable, **report, "remediation": remediation(report, priced)}
+    if unpriced:  # model names only with --names: without it the output holds only counts
+        out["unpriced_models"] = unpriced if args.names else len(unpriced)
+        which = ("model " + ", ".join(unpriced)) if args.names else \
+            f"{len(unpriced)} model{'' if len(unpriced) == 1 else 's'} (--names lists them)"
+        out["remediation"].append(f"No price for {which}: add --prices MODEL=IN,OUT for each, "
+                                  "or a default --prices IN,OUT.")
     print(json.dumps(out, indent=2, ensure_ascii=False) if args.json else _check_text(out))
     if args.min_grade and any(GRADE_ORDER.index(w["grade"]["grade"]) > GRADE_ORDER.index(args.min_grade)
                               for w in report["workflows"]):
@@ -371,7 +377,11 @@ def main(argv: list[str] | None = None) -> int:
     c = sub.add_parser("check", help="say what the analysis can find in raw traces, before preparing; "
                                      "writes nothing and opens no connection")
     c.add_argument("files", nargs="+", help="trace files, as for prepare; directories and symlinks are refused")
-    c.add_argument("--prices", metavar="IN,OUT", help="$ per 1M input and output tokens, to estimate missing cost")
+    c.add_argument("--prices", action="append", metavar="[MODEL=]IN,OUT",
+                   help="$ per 1M input and output tokens, to estimate missing cost: IN,OUT for every model, "
+                        "MODEL=IN,OUT for one model (repeat it for each)")
+    c.add_argument("--prices-file", metavar="FILE",
+                   help='JSON prices per model, e.g. {"gpt-5": [1.25, 10], "*": [3, 15]}; "*" is every other model')
     c.add_argument("--json", action="store_true", help="print one JSON object")
     c.add_argument("--names", action="store_true", help="list workflow and file names (left out by default)")
     c.add_argument("--min-grade", choices=list(GRADE_ORDER), help="exit 1 when any workflow grades below this")

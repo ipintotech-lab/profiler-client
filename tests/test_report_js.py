@@ -420,3 +420,23 @@ def test_the_page_keeps_a_needs_review_findings_consistency_and_covered_cost():
     page = view({"summary": {"opportunities": [o], "next_steps": [{**o, "step": "review"}]}})
     for kept in (page["summary"]["opportunities"][0], page["summary"]["next_steps"][0]):
         assert kept["consistency"] == 0.85 and kept["covered_cost"] == 0.17
+
+
+_ESTIMATED = {"gaps": [{"key": "cost", "label": "Cost", "status": "estimated", "coverage": 0, "effect": "estimated"}]}
+
+
+def test_an_estimated_cost_is_marked_under_the_headline():
+    report = _report()
+    report["summary"] = {**report.get("summary", {}), "replaceable": {"cost": 3.5, "findings": 2},
+                         "totals": {"cost": 10.0}}
+    assert "estimated" not in _render(report)["sub"]
+    sub = _render({**report, "data_quality": _ESTIMATED})["sub"]
+    assert "$3.50 of $10.00" in sub
+    assert '<span class="estimated">Cost estimated from tokens at your prices' in sub
+
+
+def test_the_overview_is_marked_when_any_workflows_cost_is_estimated():
+    overview = {"overview": {"workflows": [{"name": "wf", "runs": 3, "spend": 10.0, "replaceable": 3.5, "findings": 2}],
+                             "totals": {"spend": 10.0, "replaceable": 3.5, "findings": 2}},
+                "reports": {"wf": {**_report(), "data_quality": _ESTIMATED}}}
+    assert "Cost estimated from tokens" in _render(overview)["sub"]

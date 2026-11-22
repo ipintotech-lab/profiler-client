@@ -93,12 +93,37 @@ def is_tool(e) -> bool:
     return e.tool is not None or e.event_type == "tool_call"
 
 
+def _price_text(p: dict) -> str:
+    return f"${p['input_per_mtok']:g} / ${p['output_per_mtok']:g}"
+
+
+def _estimate_effect(estimated: dict) -> str:
+    """What the estimate is, in words: one price for every model (the old
+    shape) or one per model (``by_model``), and the calls left unpriced."""
+    by_model = estimated.get("by_model")
+    if by_model is None:
+        prices = f"({_price_text(estimated)} per 1M input / output tokens)"
+    else:
+        prices = "(per 1M input / output tokens: " + "; ".join(
+            f"{p['model'] or 'no model'} {_price_text(p)} on {p['events']} call{'' if p['events'] == 1 else 's'}"
+            for p in by_model) + ")"
+    unpriced = estimated.get("unpriced", 0)
+    return (f"Cost is estimated for {estimated['events']} LLM calls from their tokens {prices}. "
+            + (f"{unpriced} LLM call{' has' if unpriced == 1 else 's have'} tokens but no price for "
+               f"{'its' if unpriced == 1 else 'their'} model, so no cost. " if unpriced else "")
+            + "Every input token is priced at the full rate (cached input usually costs less), "
+            "so treat it as an upper bound.")
+
+
 def check_data_quality(events: list, estimated: dict | None = None) -> dict:
     """Coverage of each attribute the report relies on, and the gaps.
 
     ``events`` are trace events with the contract's fields as attributes.
     ``estimated`` (from the server's ``estimate_missing_costs``) marks cost
-    as filled in by an estimate rather than recorded."""
+    as filled in by an estimate rather than recorded: ``{"events",
+    "input_per_mtok", "output_per_mtok"}`` for one price, or ``{"events",
+    "by_model": [{"model", "input_per_mtok", "output_per_mtok", "events"}],
+    "unpriced"}`` for prices per model."""
     groups = {"llm": [e for e in events if is_llm(e)], "tool": [e for e in events if is_tool(e)], "all": events}
     attributes, gaps = [], []
     for key, label, group, present, effect in _ATTRIBUTES:
@@ -110,11 +135,7 @@ def check_data_quality(events: list, estimated: dict | None = None) -> dict:
         entry = {"key": key, "label": label, "coverage": round(share, 3), "status": status}
         if key == "cost" and estimated:
             entry["status"] = "estimated"
-            entry["effect"] = (
-                f"Cost is estimated for {estimated['events']} LLM calls from their tokens "
-                f"(${estimated['input_per_mtok']:g} / ${estimated['output_per_mtok']:g} per 1M input / output tokens). "
-                "Every input token is priced at the full rate (cached input usually costs less), so treat it as an upper bound."
-            )
+            entry["effect"] = _estimate_effect(estimated)
             gaps.append(entry)
         elif status != "ok":
             entry["effect"] = effect
@@ -342,7 +363,8 @@ def remediation(report: dict, prices: bool) -> list[str]:
         out.append("Record tool arguments and results in your traces: without them repeated calls can't be matched.")
     money = by_key["dollar_figures"]
     if money["status"] != "yes" and "--prices" in money["reason"] and not prices:
-        out.append("Pass token prices to estimate cost: --prices IN,OUT ($ per 1M input and output tokens).")
+        out.append("Pass token prices to estimate cost: --prices IN,OUT for every model, or --prices MODEL=IN,OUT "
+                   "per model ($ per 1M input and output tokens).")
     thin = [w for w in report["workflows"] if w["runs"] < GOOD_RUNS]
     if thin:
         fewest = min(w["runs"] for w in thin)

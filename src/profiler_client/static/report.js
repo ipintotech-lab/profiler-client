@@ -381,6 +381,16 @@ function renderMap(q, data, all = false) {
 }
 
 const gapsOf = data => (data.data_quality?.gaps || []).filter(gap => gap.key !== 'user_input');  // the client drops it on purpose
+// cost filled in from tokens at the user's prices, not recorded: every dollar figure is an estimate
+const costEstimated = data => (data.data_quality?.gaps || []).some(gap => gap.key === 'cost' && gap.status === 'estimated');
+const ESTIMATED = 'Cost estimated from tokens at your prices; the trace recorded none (see What the report couldn’t see).';
+
+// say so under the headline, where the dollar figures are read
+function markEstimate(q, estimated) {
+  if (!estimated) return;
+  const sub = q('sub').textContent;
+  q('sub').innerHTML = `${sub ? `${esc(sub)} ` : ''}<span class="estimated">${esc(ESTIMATED)}</span>`;
+}
 
 
 function renderSteps(q, data, showAllSteps) {
@@ -1175,6 +1185,7 @@ function renderReport(root, data, { name = '', meta = [], showEvent = null, decl
     renderFirst(q, data, new Set([...q('map').querySelectorAll('g[data-node]')].map(g => g.dataset.node)));
   };
   renderLead(q, data);
+  markEstimate(q, costEstimated(data));
   renderRisks(q, data.summary?.risk_totals, data.summary?.risk_labels);
   renderBetween(q, data);
   q('map').addEventListener('click', e => {
@@ -1296,6 +1307,7 @@ function renderOverview(root, data, { name = '', meta = [], showEvent = null, de
     const q = k => root.querySelector(`[data-r="${k}"]`);
     renderHead(q, data.grade, name, meta, restored);
     renderOverviewLead(q, o);
+    markEstimate(q, Object.values(data.reports || {}).some(costEstimated));
     renderRisks(q, o.risk_totals, o.risk_labels);
     const runs = (o.workflows || []).reduce((n, r) => n + (r.runs || 0), 0);
     q('totals').innerHTML = `${money(o.totals?.spend)} <span class="k">across</span> ${plural(runs, 'run')} <span class="k">in</span> ${plural((o.workflows || []).length, 'workflow')}.`;

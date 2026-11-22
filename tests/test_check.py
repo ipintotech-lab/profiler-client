@@ -65,6 +65,36 @@ def test_tokens_without_cost_need_prices(tmp_path, capsys):
     assert not any("--prices" in line for line in priced["remediation"])
 
 
+def test_a_price_for_the_traces_own_model_name_covers_it(tmp_path, capsys):
+    # the model id isn't public, so the events carry a pseudonym: the price is given by the trace's name
+    path = _log(tmp_path, cost=False)
+    _, priced = _check(capsys, path, "--prices", "acme-finetune-v3=1.25,10")
+    assert _found(priced)["dollar_figures"] == "yes" and "unpriced_models" not in priced
+    prices = tmp_path / "prices.json"
+    prices.write_text(json.dumps({"acme-finetune-v3": [1.25, 10]}), encoding="utf-8")
+    _, from_file = _check(capsys, path, "--prices-file", prices)
+    assert _found(from_file)["dollar_figures"] == "yes"
+
+
+def test_a_model_no_price_covers_is_named(tmp_path, capsys):
+    _, out = _check(capsys, _log(tmp_path, cost=False), "--prices", "gpt-5=1.25,10")
+    assert out["unpriced_models"] == 1 and "acme" not in json.dumps(out)  # only counts without --names
+    assert _found(out)["dollar_figures"] == "limited"
+    assert any("1 model (--names lists them)" in line and "MODEL=IN,OUT" in line for line in out["remediation"])
+    _, named = _check(capsys, _log(tmp_path, cost=False), "--prices", "gpt-5=1.25,10", "--names")
+    assert named["unpriced_models"] == ["acme-finetune-v3"]
+    # a default price covers every model not listed
+    _, covered = _check(capsys, _log(tmp_path, cost=False), "--prices", "gpt-5=1.25,10", "--prices", "3,15")
+    assert "unpriced_models" not in covered
+
+
+@pytest.mark.parametrize("content", ["[1, 2]", "{}", '{"gpt-5": [1]}', '{"gpt-5": [-1, 2]}', "not json"])
+def test_a_bad_prices_file_is_refused(tmp_path, content):
+    prices = tmp_path / "prices.json"
+    prices.write_text(content, encoding="utf-8")
+    assert main(["check", str(_log(tmp_path)), "--prices-file", str(prices)]) == 1
+
+
 def test_few_runs_and_a_small_dataset_are_named(tmp_path, capsys):
     _, out = _check(capsys, _log(tmp_path, runs=MIN_BYPASS_OBSERVATIONS - 1))
     assert _found(out)["script_sequence"] == "limited" and _found(out)["rule_for_llm"] == "no"
@@ -117,7 +147,7 @@ def test_check_writes_nothing_and_opens_no_connection(tmp_path, capsys, monkeypa
     assert sorted(tmp_path.rglob("*")) == before
 
 
-@pytest.mark.parametrize("prices", ["1,2,3", "x,1", "-1,2"])
+@pytest.mark.parametrize("prices", ["1,2,3", "x,1", "-1,2", "gpt-5=1", "gpt-5=1,2e9"])
 def test_bad_prices_are_refused(tmp_path, prices):
     assert main(["check", str(_log(tmp_path)), f"--prices={prices}"]) == 1
 
