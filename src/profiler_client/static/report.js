@@ -481,7 +481,12 @@ function renderSteps(q, data, showAllSteps) {
       : `${plural(steps.length - listed.length, 'more step')} recorded no cost and no repeats. <button class="link" type="button" data-steps="all">Show them</button>`}</td></tr>` : '');
 }
 
+// Openly7's brand bar and footer: shown when the host asks (profiler-client open and app, `brand: true`);
+// a host with its own Openly7 header, like the signed-in site, leaves them hidden
+const FOOT = `
+  <p class="brandfoot" data-r="brandFoot" hidden><b>Openly7</b> · AI Agent Profiler beta · Your traces stay on your machine; Openly7 sees pseudonyms only.</p>`;
 const HEAD = `
+  <div class="brandbar" data-r="brand" hidden><span class="o7">Openly<b>7</b></span><span class="prod">AI Agent Profiler</span><span class="beta">beta</span></div>
   <button class="back" type="button" data-r="back" hidden>← All workflows</button>
   <div class="sheet-head">
     <div class="title">
@@ -559,7 +564,7 @@ const SHEET = HEAD + `
   <section data-r="gapsSection">
     <h3>What the report couldn't see</h3>
     <dl class="gaps" data-r="gaps"></dl>
-  </section>`;
+  </section>` + FOOT;
 
 // With `showEvent` (the report's path on this machine), a map step lists a few of its calls, each with the
 // profiler-client command that prints its original record. The page runs nothing itself.
@@ -1159,11 +1164,14 @@ function renderCapacity(q, data) {
       <table class="tbl"><thead><tr><th>If a used call is worth</th><th class="num">Size for</th></tr></thead><tbody>${sens}</tbody></table>` : ''}`;
 }
 
-function renderReport(root, data, { name = '', meta = [], showEvent = null, declareReadOnly = null, restored = false } = {}) {
+const showBrand = (q, on) => { q('brand').hidden = !on; q('brandFoot').hidden = !on; };
+
+function renderReport(root, data, { name = '', meta = [], showEvent = null, declareReadOnly = null, restored = false, brand = false } = {}) {
   root.innerHTML = SHEET;
   const q = k => root.querySelector(`[data-r="${k}"]`);
   const sm = data.summary || {}, t = sm.totals || {}, g = data.grade;
   renderHead(q, g, name, meta, restored);
+  showBrand(q, brand);
   // the map, its wiring and the cards that point at it, drawn again when the reader shows all links or fewer
   DISPLAY = new Map();
   const am = data.availability?.graph?.available && data.graph?.agent_graph?.layout ? agentMapModel(data) : null;
@@ -1239,42 +1247,187 @@ function renderReport(root, data, { name = '', meta = [], showEvent = null, decl
   q('notes').textContent = sm.notes || '';
 }
 
+// The savings overview: what the dataset could save, what to do first, and where. Every figure is a finding the
+// server's analysis counts in its headline (each call counted once); "Also found" findings are shown but never added.
 const OVERVIEW = HEAD + `
-  <div class="lead" data-r="lead">
-    <p class="head" data-r="head"></p>
-    <p class="sub" data-r="sub"></p>
+  <div class="sv-hero">
+    <div class="sv-card">
+      <p class="sv-big" data-r="svBig"></p>
+      <p class="sv-lead" data-r="svLead"></p>
+      <p class="why estimated" data-r="svEstimate" hidden></p>
+      <div class="sv-stack" data-r="svStack" role="img"></div>
+      <p class="sv-legend" data-r="svLegend"></p>
+      <p class="why" data-r="svInvestigate" hidden></p>
+    </div>
+    <div class="sv-card sv-proj" data-r="svProj">
+      <label for="sv-runs">Your runs per month</label>
+      <input id="sv-runs" data-r="svRuns" type="number" min="0" step="1000" inputmode="numeric" placeholder="for example 100000">
+      <p class="sv-out" data-r="svOut"></p>
+      <p data-r="svOutReady"></p>
+      <p class="why" data-r="svNote"></p>
+    </div>
   </div>
-  <ul class="risks" data-r="risks" hidden aria-label="Findings by risk"></ul>
-  <p class="totals" data-r="totals"></p>
+  <section data-r="svActionsSec">
+    <h3>Do these first</h3>
+    <ol class="sv-actions" data-r="svActions"></ol>
+    <p class="why" data-r="svActionsNote"></p>
+    <div data-r="svAlso"></div>
+  </section>
   <section>
-    <h3>Which workflows matter</h3>
-    <p class="why">The workflows with the most spend a rule, a script or a cache could replace come first. Open one to see its map and what to do first.</p>
+    <h3>Where the savings are</h3>
+    <p class="why">The workflows with the most spend a rule, a script or a cache could replace come first. Open one to see its map and every finding.</p>
     <p class="keys" aria-hidden="true"><span class="key"><b></b>Spend</span><span class="key"><b class="rep"></b>Could be replaced</span></p>
     <table class="tbl wfs" data-r="workflows">
       <thead><tr><th>Workflow</th><th class="barh"><span class="sr">Spend that could be replaced</span></th><th class="num">Spend</th><th class="num">Could be replaced</th><th>Findings</th></tr></thead>
       <tbody></tbody>
     </table>
-    <p class="why">Each call belongs to one workflow, so the rows add up to the totals above.</p>
-  </section>`;
+    <p class="why">Each call belongs to one workflow, so the rows add up to the total above.</p>
+  </section>
+  <details class="sv-more">
+    <summary>Details for engineers</summary>
+    <ul class="risks" data-r="risks" hidden aria-label="Findings by risk"></ul>
+    <p class="totals" data-r="totals"></p>
+  </details>` + FOOT;
 
-// the dataset's headline, by the same rules as a workflow's: the share first under $50
-function renderOverviewLead(q, o) {
-  const t = o.totals || {}, n = plural((o.workflows || []).length, 'workflow');
-  const what = 'a rule, a script or a cache could replace';
-  const found = `from ${plural(t.findings, 'finding')}, each call counted once`;
-  if (!t.spend) {
-    q('head').textContent = `No cost is recorded in this dataset, so the report can’t say how much of it went to calls ${what}.`;
-    q('sub').textContent = '';
-  } else if (!t.replaceable) {
-    q('head').textContent = `The report found no calls in this dataset that ${what}.`;
-    q('sub').textContent = `Its ${n} cost ${money(t.spend)}.`;
-  } else if (t.replaceable >= 50) {
-    q('head').innerHTML = `<b>${money(t.replaceable)}</b> of the ${money(t.spend)} this dataset cost went to calls ${what}.`;
-    q('sub').textContent = `That is ${share(t.replaceable, t.spend)} of the spend across ${n}, ${found}.`;
-  } else {
-    q('head').innerHTML = `<b>${share(t.replaceable, t.spend)}</b> of this dataset’s spend went to calls ${what}.`;
-    q('sub').textContent = `${money(t.replaceable)} of ${money(t.spend)} across ${n}, ${found}.`;
+// a risk in words, never color alone
+const TIER = { low: ['ready', 'Ready · low risk'], medium: ['review', 'Review first'], high: ['invest', 'Investigate'] };
+// how to act on each kind of finding
+const HOW = {
+  CONDITIONAL_LLM_BYPASS: ['Write the rule or lookup the finding shows: which input gives which choice.',
+    'Replay it against past calls, and keep the model as a fallback for inputs it hasn’t seen.'],
+  PARTIAL_LLM_BYPASS: ['Write the rule for the inputs whose choice never changes.', 'Send every other input to the model, and replay against past calls first.'],
+  CACHE_RESULT: ['Reuse the first result for the same input.', 'Check that the step only reads before switching the cache on.'],
+  EXTRACT_DETERMINISTIC_SUBSTEP: ['Say which of these steps change something, so the report can tell whether a script is safe.',
+    'Script the steps in order and replay it against past runs.'],
+  CROSS_AGENT_DUPLICATE: ['Fetch the result once in the run.', 'Pass it to the other agent in the handoff.'],
+};
+const LLM_AT = /^llm_call ← (.+)$/;
+const andList = xs => xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
+const TOP_ACTIONS = 3, ALSO_SHOWN = 2;
+
+// The overview's figures from the result: totals and risk tiers from `overview`, actions from each workflow's
+// counted findings. One step's LLM calls, split by what came before them (llm_call ← X), are one action.
+function savingsModel(data) {
+  const o = data.overview || {}, t = o.totals || {}, rt = o.risk_totals;
+  const runs = (o.workflows || []).reduce((n, r) => n + (r.runs || 0), 0);
+  const groups = new Map(), also = [];
+  for (const [wf, rep] of Object.entries(data.reports || {})) {
+    for (const f of rep?.summary?.findings || []) {
+      if (!f.saving) continue;
+      // not counted because other findings already count its calls: shown, never added
+      if (!f.counted) { if (f.covered_by != null || f.held_out === 'overlap') also.push({ wf, f }); continue; }
+      const at = LLM_AT.exec(f.title || '');
+      const key = [wf, f.type, f.risk, at ? '@llm' : f.title].join('\u0000');
+      if (!groups.has(key)) groups.set(key, { wf, type: f.type, risk: f.risk, action: f.action, title: at ? null : f.title,
+                                              places: [], saving: 0, observations: 0, reasons: [] });
+      const g = groups.get(key);
+      g.saving += f.saving;
+      g.observations += f.observations || 0;
+      if (at) g.places.push(at[1]);
+      for (const r of f.risk_reasons || []) if (!g.reasons.includes(r)) g.reasons.push(r);
+    }
   }
+  // ready (low risk) first, then review first, each by saving: "do these first" starts with what's safe to do
+  const rank = r => ({ low: 0, medium: 1, high: 2 }[r] ?? 1);
+  const actions = [...groups.values()].sort((a, b) => rank(a.risk) - rank(b.risk) || b.saving - a.saving || a.wf.localeCompare(b.wf));
+  also.sort((a, b) => b.f.saving - a.f.saving);
+  return { spend: t.spend || 0, saved: t.replaceable || 0, runs, actions, also,
+           tiers: rt ? { ready: rt.low?.saving || 0, review: rt.medium?.saving || 0, investigate: rt.high?.count || 0 } : null };
+}
+
+// one rounding for every figure: whole dollars once the total reaches $100, else cents; a total shown with its
+// parts is the sum of the rounded parts, so the page always adds up
+const projector = (total, n) => {
+  const whole = total * n >= 100;
+  const rnd = v => whole ? Math.round(v) : Math.round(v * 100) / 100;
+  return { rnd, usd: v => '$' + (whole ? v.toLocaleString('en-US') : v.toFixed(2)) };
+};
+const perRunMoney = v => v >= 0.01 ? money(v) : `$${v.toFixed(4)}`;
+
+function renderSavingsHead(q, m) {
+  const what = 'a rule, a script or a cache could replace';
+  q('svStack').hidden = q('svLegend').hidden = !m.spend || !m.saved;
+  if (!m.spend) {
+    q('svBig').textContent = '';
+    q('svLead').textContent = `No cost is recorded in this dataset, so the report can’t say how much of it went to calls ${what}. Give token prices to estimate it.`;
+    return;
+  }
+  q('svBig').innerHTML = `${money(m.saved)} <small>of ${money(m.spend)} could be saved</small>`;
+  if (!m.saved) { q('svLead').textContent = `The report found no calls in this dataset that ${what}.`; return; }
+  q('svLead').innerHTML = `<b>${share(m.saved, m.spend)}</b> of what these agents spent went to calls ${what}.`;
+  const pct = v => (100 * v / m.spend).toFixed(2) + '%';
+  const needed = `<span><i class="needed"></i>${money(Math.max(0, m.spend - m.saved))} needed work</span>`;
+  if (m.tiers) {
+    const { ready, review } = m.tiers;
+    q('svStack').innerHTML = `<i class="ready" style="width:${pct(ready)}"></i><i class="review" style="width:${pct(review)}"></i>`;
+    q('svStack').setAttribute('aria-label', `Spend: ${money(ready)} ready to save, ${money(review)} to review first, ${money(m.spend - m.saved)} needed`);
+    q('svLegend').innerHTML = `<span><i class="ready"></i><b>${money(ready)}</b> ready to save · low risk</span>` +
+      `<span><i class="review"></i><b>${money(review)}</b> review first</span>${needed}`;
+    q('svInvestigate').hidden = !m.tiers.investigate;
+    q('svInvestigate').innerHTML = m.tiers.investigate ? `<span class="pill invest">Investigate</span> Plus ${plural(m.tiers.investigate, 'finding')} to investigate: results that change for the same input. They aren’t priced until the cause is known.` : '';
+  } else {  // a result from before risk tiers: one bar for all of it
+    q('svInvestigate').hidden = true;
+    q('svStack').innerHTML = `<i class="saved" style="width:${pct(m.saved)}"></i>`;
+    q('svStack').setAttribute('aria-label', `Spend: ${money(m.saved)} could be saved, ${money(m.spend - m.saved)} needed`);
+    q('svLegend').innerHTML = `<span><i class="saved"></i><b>${money(m.saved)}</b> could be saved</span>${needed}`;
+  }
+}
+
+// the top actions, each with its saving per run or, with a volume, per month; returns the rounded monthly figures
+function renderActions(q, m, n) {
+  const top = m.actions.slice(0, TOP_ACTIONS);
+  const p = projector(m.runs ? m.saved / m.runs : 0, n);
+  const monthly = top.map(a => n && m.runs ? p.rnd(a.saving / m.runs * n) : null);
+  q('svActionsSec').hidden = !top.length;
+  q('svActions').innerHTML = top.map((a, i) => {
+    const [cls, word] = TIER[a.risk] || TIER.medium;
+    const places = a.places.map(x => x === 'user_prompt' ? 'the prompt' : `<code>${stepName(x)}</code>`);
+    const where = places.length ? `the LLM call after ${andList(places)}${places.length > 1 ? ` (${places.length} places)` : ''}`
+      : `step <code>${stepName(a.title)}</code>`;
+    const why = a.reasons.filter(r => !/not recorded/.test(r)).slice(0, 2).join('; ') || `${plural(a.observations, 'call')} behind it`;
+    const steps = HOW[a.type] || [a.action];
+    return `<li class="sv-act"><span class="rank">${i + 1}</span>
+      <div><h4>${esc(TITLE[a.type] || plainName(a.action || ''))}</h4><p class="where">${stepName(a.wf)} · ${where}</p>
+        <p class="why"><span class="pill ${cls}">${word}</span> ${esc(why.charAt(0).toUpperCase() + why.slice(1))}.</p></div>
+      <p class="money"><b>${money(a.saving)}</b><span>${monthly[i] != null ? `≈ ${p.usd(monthly[i])} / month` : `${perRunMoney(a.saving / (m.runs || 1))} per run`}</span></p>
+      <details><summary>How to do it</summary><ol>${steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol></details></li>`;
+  }).join('');
+  const sum = top.reduce((s, a) => s + a.saving, 0);
+  const allReady = m.tiers && top.length && top.every(a => a.risk === 'low') && Math.abs(sum - m.tiers.ready) < 1e-6;
+  q('svActionsNote').textContent = top.length ? `Savings never overlap: each call is counted once, under one action. ` +
+    `${top.length === 1 ? 'This action is' : `These ${top.length} actions are`} ${money(sum)} of the ${money(m.saved)}${allReady ? ', all of the ready saving' : ''}.` : '';
+  q('svAlso').innerHTML = m.also.slice(0, ALSO_SHOWN).map(({ wf, f }) =>
+    `<p class="sv-also"><b>Also found, adds nothing to the total:</b> ${esc(TITLE[f.type] || plainName(f.action || ''))} in ${stepName(wf)} (<code>${stepName(f.title)}</code>). ` +
+    `${money(f.saving)} on its own, but its calls are already counted above.</p>`).join('');
+  return { monthly, allReady };
+}
+
+// the projection: the observed saving per run times the reader's volume; nothing is replayed
+function renderProjection(q, m, n) {
+  const shown = renderActions(q, m, n);
+  q('svProj').hidden = !m.runs || !m.saved;
+  const perRun = m.runs ? m.saved / m.runs : 0;
+  q('svNote').textContent = `A projection: the saving observed per run (${perRunMoney(perRun)}) times your volume. Not a forecast, and nothing has been replayed yet.`;
+  if (!n) {
+    q('svOut').textContent = `${perRunMoney(perRun)} per run`;
+    q('svOutReady').textContent = 'Type your runs per month to see a monthly figure.';
+    return;
+  }
+  const p = projector(perRun, n);
+  const ready = shown.allReady ? shown.monthly.reduce((s, v) => s + v, 0) : p.rnd(m.tiers ? m.tiers.ready / m.runs * n : 0);
+  const rest = p.rnd((m.saved - (m.tiers ? m.tiers.ready : 0)) / m.runs * n);
+  q('svOut').textContent = `${p.usd(p.rnd(ready + rest))} / month`;
+  q('svOutReady').textContent = m.tiers ? `could be saved · ${p.usd(p.rnd(ready))} of it ready now` : 'could be saved';
+}
+
+function renderSavings(q, data) {
+  const m = savingsModel(data);
+  renderSavingsHead(q, m);
+  const runs = q('svRuns');
+  const update = () => renderProjection(q, m, Math.max(0, +runs.value || 0));
+  runs.addEventListener('input', update);
+  update();
+  return m;
 }
 
 function renderOverviewRows(q, o, reports) {
@@ -1290,7 +1443,7 @@ function renderOverviewRows(q, o, reports) {
       <td data-label="Findings">${count(r.findings)}${r.highest_risk ? `<span class="note">${esc(labels[r.highest_risk] || r.highest_risk)}</span>` : ''}</td></tr>`).join('');
 }
 
-function renderOverview(root, data, { name = '', meta = [], showEvent = null, declareReadOnly = null, workflow = null, restored = false } = {}) {
+function renderOverview(root, data, { name = '', meta = [], showEvent = null, declareReadOnly = null, workflow = null, restored = false, brand = false } = {}) {
   const o = data.overview;
   // redraw `root`, keeping what the host added: its buttons in .tools and anything after the sheet
   let own = new Set();
@@ -1306,8 +1459,12 @@ function renderOverview(root, data, { name = '', meta = [], showEvent = null, de
     root.innerHTML = OVERVIEW;
     const q = k => root.querySelector(`[data-r="${k}"]`);
     renderHead(q, data.grade, name, meta, restored);
-    renderOverviewLead(q, o);
-    markEstimate(q, Object.values(data.reports || {}).some(costEstimated));
+    showBrand(q, brand);
+    renderSavings(q, data);
+    if (Object.values(data.reports || {}).some(costEstimated)) {  // under the savings figure, where it's read
+      q('svEstimate').hidden = false;
+      q('svEstimate').textContent = ESTIMATED;
+    }
     renderRisks(q, o.risk_totals, o.risk_labels);
     const runs = (o.workflows || []).reduce((n, r) => n + (r.runs || 0), 0);
     q('totals').innerHTML = `${money(o.totals?.spend)} <span class="k">across</span> ${plural(runs, 'run')} <span class="k">in</span> ${plural((o.workflows || []).length, 'workflow')}.`;
@@ -1321,7 +1478,7 @@ function renderOverview(root, data, { name = '', meta = [], showEvent = null, de
   const show = wf => {
     if (!data.reports[wf]) return;
     redraw(() => {
-      renderReport(root, data.reports[wf], { name: wf, meta: [plainName(name), ...meta].filter(Boolean), showEvent, declareReadOnly, restored });
+      renderReport(root, data.reports[wf], { name: wf, meta: [plainName(name), ...meta].filter(Boolean), showEvent, declareReadOnly, restored, brand });
       const back = root.querySelector('[data-r="back"]');
       back.hidden = false;
       back.addEventListener('click', () => overview(wf));
@@ -1333,11 +1490,34 @@ function renderOverview(root, data, { name = '', meta = [], showEvent = null, de
   return { show, overview: () => overview() };
 }
 
+// A report with your names put back from a name map (`profiler-client names`), in this browser: the same
+// swap `profiler-client open` makes on your machine, so a report looks the same on both. Names come only from
+// the map's datasets that this report was made from, so another dataset's names never land in it. Nothing is
+// sent anywhere: this only reads the map it is given. Returns { data, restored, unmatched, unlisted } or, for a
+// map of other datasets or not a name map, { error }.
+const NAME_MAP = 'openly7-name-map';
+const PSEUDONYM = /h:[0-9a-f]{64}/g;
+function restoreNames(data, map) {
+  if (!map || map.format !== NAME_MAP || map.version !== 1 || typeof map.names !== 'object' || !Array.isArray(map.datasets))
+    return { error: 'This file isn’t a name map. Make one with: profiler-client names <report.json>' };
+  const hashes = Array.isArray(data?.payload_sha256s) && data.payload_sha256s.length ? data.payload_sha256s
+    : typeof data?.payload_sha256 === 'string' ? [data.payload_sha256] : [];
+  const listed = hashes.filter(h => map.datasets.includes(h));
+  if (!listed.length) return { error: 'This name map is for another dataset, so no names were restored.' };
+  const names = new Map(Object.entries(map.names).filter(([k, v]) => /^h:[0-9a-f]{64}$/.test(k) && typeof v === 'string'));
+  const found = new Set(), missing = new Set();
+  const swap = s => s.replace(PSEUDONYM, t => { if (names.has(t)) { found.add(t); return names.get(t); } missing.add(t); return t; });
+  const walk = v => typeof v === 'string' ? swap(v)
+    : Array.isArray(v) ? v.map(walk)
+      : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [swap(k), walk(x)])) : v;
+  return { data: walk(data), restored: found.size, unmatched: missing.size, unlisted: hashes.filter(h => !listed.includes(h)) };
+}
+
 function render(root, data, opts = {}) {
   if (data && data.overview && data.reports) return renderOverview(root, data, opts);
   renderReport(root, data, opts);
   return { show() {}, overview() {} };
 }
 
-window.ProfilerReport = { render };
+window.ProfilerReport = { render, restoreNames };
 })();

@@ -93,6 +93,24 @@ def forget_name_lists(directory: Path | None = None, payload_sha256: str | None 
     return len(paths)
 
 
+NAME_MAP_FORMAT = "openly7-name-map"
+NAME_MAP_VERSION = 1
+
+
+def name_map(hashes: list[str], directory: Path | None = None) -> dict:
+    """The name map for a report's datasets, to load into the Openly7 page in a browser: the same
+    pseudonym-to-name pairs ``open`` restores from, for those datasets only. It stays on this machine;
+    the page swaps the names in the browser (report.js ``restoreNames``) and never sends them."""
+    names: dict[str, str] = {}
+    listed = []
+    for digest in hashes:
+        found = read_name_lists(directory, digest)
+        if found:
+            listed.append(digest)
+            names.update(found)
+    return {"format": NAME_MAP_FORMAT, "version": NAME_MAP_VERSION, "datasets": listed, "names": names}
+
+
 def translate(value: Any, names: dict[str, str], found: set[str], missing: set[str]) -> Any:
     """``value`` with every known pseudonym replaced, in strings and in keys."""
     def sub(match) -> str:
@@ -143,6 +161,10 @@ def view(report: dict) -> dict:
                               for r in _list(overview.get("workflows")) if isinstance(r, dict)],
                 "totals": _pick(overview.get("totals"), ("spend", "replaceable", "share", "findings")),
                 **_pick(overview, ("risk_labels",)),
+                # the risk tiers' counts and savings (the savings overview and the risk tiles)
+                **({"risk_totals": {risk: _pick(t, ("count", "counted", "saving"))
+                                    for risk, t in overview["risk_totals"].items() if isinstance(t, dict)}}
+                   if isinstance(overview.get("risk_totals"), dict) else {}),
             },
             "reports": {name: _workflow_view(r) for name, r in reports.items() if isinstance(r, dict)},
             "grade": _pick(report.get("grade"), ("grade", "word")) or None,
@@ -151,7 +173,18 @@ def view(report: dict) -> dict:
 
 
 def _workflow_view(report: dict) -> dict:
-    summary = _pick(report.get("summary"), ("totals", "notes", "replaceable", "risk_labels"))
+    summary = _pick(report.get("summary"), ("totals", "notes", "replaceable", "risk_labels", "highest_risk"))
+    risk_totals = _pick(report.get("summary"), ("risk_totals",)).get("risk_totals")
+    if isinstance(risk_totals, dict):
+        summary["risk_totals"] = {risk: _pick(t, ("count", "counted", "saving"))
+                                  for risk, t in risk_totals.items() if isinstance(t, dict)}
+    # every finding, for All findings and the savings overview: what it is, where, its saving and risk, and
+    # whether the headline counts it; never its inputs or outputs
+    if "findings" in _pick(report.get("summary"), ("findings",)):
+        summary["findings"] = [
+            _pick(f, ("type", "title", "nodes", "action", "saving", "observations", "risk", "risk_reasons",
+                      "counted", "covered_by", "held_out"))
+            for f in _list(report["summary"]["findings"]) if isinstance(f, dict)]
     if "next_steps" in _pick(report.get("summary"), ("next_steps",)):
         summary["next_steps"] = [
             _pick(n, ("step", "do", "type", "title", "nodes", "saving", "risk", "risk_reasons", "observations", "lookup_entries",
@@ -235,7 +268,7 @@ def render_html(report: dict, title: str, restored: int | None = None, unmatched
 (function () {{
   const page = JSON.parse(document.getElementById('report-data').textContent);
   const root = document.getElementById('report');
-  ProfilerReport.render(root, page.report, {{ name: page.name, meta: page.meta, showEvent: page.source, restored: page.restored }});
+  ProfilerReport.render(root, page.report, {{ name: page.name, meta: page.meta, showEvent: page.source, restored: page.restored, brand: true }});
   const print = document.createElement('button');
   print.className = 'btn';
   print.type = 'button';

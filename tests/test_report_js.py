@@ -439,4 +439,6 @@ def test_the_overview_is_marked_when_any_workflows_cost_is_estimated():
     overview = {"overview": {"workflows": [{"name": "wf", "runs": 3, "spend": 10.0, "replaceable": 3.5, "findings": 2}],
                              "totals": {"spend": 10.0, "replaceable": 3.5, "findings": 2}},
                 "reports": {"wf": {**_report(), "data_quality": _ESTIMATED}}}
-    assert "Cost estimated from tokens" in _render(overview)["sub"]
+    assert "Cost estimated from tokens" in _render(overview)["svEstimate"]  # under the savings figure
+    overview["reports"]["wf"]["data_quality"] = {"gaps": []}
+    assert not _render(overview).get("svEstimate")
