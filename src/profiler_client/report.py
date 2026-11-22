@@ -227,7 +227,7 @@ def _workflow_view(report: dict) -> dict:
             # agents, decisions and how they link: ids, counts, costs and the map's positions only
             "agent_graph": _pick(graph.get("agent_graph"), ("router", "agents", "decisions", "links", "layout")) or None,
         } if isinstance(graph, dict) else None,
-        "data_quality": {"gaps": [_pick(g, ("key", "label", "effect"))
+        "data_quality": {"gaps": [_pick(g, ("key", "label", "status", "effect", "unpriced"))
                                   for g in _list(_pick(report.get("data_quality"), ("gaps",)).get("gaps"))]},
     }
 

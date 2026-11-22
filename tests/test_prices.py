@@ -56,6 +56,7 @@ def test_an_estimate_per_model_names_each_price_and_the_unpriced_calls(monkeypat
     assert gap["status"] == "estimated"
     assert "gpt-5 $1.25 / $10 on 2 calls; gpt-5-mini $0.25 / $2 on 1 call" in gap["effect"]
     assert "1 LLM call has tokens but no price for its model" in gap["effect"]
+    assert gap["unpriced"] == 1  # a count the overview names, not only words
 
 
 def test_the_old_single_price_estimate_reads_as_before(monkeypatch):
@@ -64,3 +65,4 @@ def test_the_old_single_price_estimate_reads_as_before(monkeypatch):
     monkeypatch.setattr(readiness, "is_llm", lambda e: True)
     (gap,) = check_data_quality([_E(1.0)], {"events": 3, "input_per_mtok": 1.25, "output_per_mtok": 10})["gaps"]
     assert gap["effect"].startswith("Cost is estimated for 3 LLM calls from their tokens ($1.25 / $10 per 1M input / output tokens).")
+    assert "unpriced" not in gap

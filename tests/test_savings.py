@@ -292,3 +292,17 @@ def test_view_keeps_what_the_savings_page_and_all_findings_draw(fixture):
         for f in summary["findings"]:
             assert set(f) <= {"type", "title", "nodes", "action", "saving", "observations", "risk", "risk_reasons",
                               "counted", "covered_by", "held_out"}
+
+
+def test_view_keeps_what_marks_an_estimated_cost(fixture):
+    # the estimate mark reads the cost gap's status, and the overview its unpriced count: view() dropped
+    # the status before, so a page from open was never marked
+    report = copy.deepcopy(fixture[0])
+    wf = next(iter(report["reports"]))
+    report["reports"][wf]["data_quality"] = {"gaps": [{"key": "cost", "label": "cost ($)", "coverage": 0, "status": "estimated",
+                                                       "effect": "Cost is estimated.", "unpriced": 7}]}
+    (gap,) = view(report)["reports"][wf]["data_quality"]["gaps"]
+    assert gap == {"key": "cost", "label": "cost ($)", "status": "estimated", "effect": "Cost is estimated.", "unpriced": 7}
+    slots = _render(view(report))["slots"]
+    assert not slots["svEstimate"]["hidden"]
+    assert "7 calls have no price" in _text(slots["svEstimate"])

@@ -1461,9 +1461,12 @@ function renderOverview(root, data, { name = '', meta = [], showEvent = null, de
     renderHead(q, data.grade, name, meta, restored);
     showBrand(q, brand);
     renderSavings(q, data);
-    if (Object.values(data.reports || {}).some(costEstimated)) {  // under the savings figure, where it's read
+    const reports = Object.values(data.reports || {});
+    if (reports.some(costEstimated)) {  // under the savings figure, where it's read
+      // the spend leaves out calls with no price for their model; say how many
+      const unpriced = reports.reduce((n, r) => n + (gapsOf(r).find(g => g.key === 'cost')?.unpriced || 0), 0);
       q('svEstimate').hidden = false;
-      q('svEstimate').textContent = ESTIMATED;
+      q('svEstimate').textContent = ESTIMATED + (unpriced ? ` ${plural(unpriced, 'call')} ${unpriced === 1 ? 'has' : 'have'} no price, so the spend leaves ${unpriced === 1 ? 'it' : 'them'} out.` : '');
     }
     renderRisks(q, o.risk_totals, o.risk_labels);
     const runs = (o.workflows || []).reduce((n, r) => n + (r.runs || 0), 0);
