@@ -39,6 +39,9 @@ from .report import render_html
 COOKIE = "pc_session"
 MAX_RAW_BYTES = 2 * 1024**3  # all trace files of one dataset, as copied to the temporary folder
 MAX_JSON_BYTES = 64 * 1024
+# a refused request's body up to this size is read and dropped before the refusal is sent: closing with unread
+# data resets the connection on Windows, and the sender then sees a network error instead of the 403
+MAX_DISCARD_BYTES = 1024 * 1024
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 CLIENT_TOKEN = re.compile(r"pc_[A-Za-z0-9_-]{1,200}")
 PAGE_CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; "
@@ -273,6 +276,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, b"this address is not this app's; use the one profiler-client app printed")
         if not self._allowed():
             self.close_connection = True
+            self._discard_body()
             return self._send(403, b"open the address profiler-client app printed")
         session = self.server.session
         route = (self.command, url.path)
@@ -314,6 +318,15 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, TypeError, PrepareError, RemoteError, OSError) as exc:
             self.close_connection = True  # a refused upload may leave its body unread
             return self._json(400, {"error": str(exc)})
+
+    def _discard_body(self) -> None:
+        """Read and drop a refused request's body, if it is small, so the refusal reaches the sender."""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return
+        if 0 < length <= MAX_DISCARD_BYTES:
+            self.rfile.read(length)
 
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)

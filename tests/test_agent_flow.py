@@ -34,6 +34,7 @@ root.querySelector = sel => { const k = (sel.match(/data-r="?([^"\\]]+)/) || [])
   if (!k) return sel === '.tools' ? tools : null; if (!slots.has(k)) slots.set(k, el()); return slots.get(k); };
 globalThis.window = {};
 globalThis.CSS = { escape: x => x };
+if (process.env.PAGE_HIDDEN) globalThis.document = { hidden: true };  // another browser tab is in front
 require(process.argv[1]);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let input = ''; process.stdin.on('data', d => { input += d; }).on('end', async () => {
@@ -54,9 +55,12 @@ let input = ''; process.stdin.on('data', d => { input += d; }).on('end', async (
 """
 
 
-def _render(data: dict, actions: list | None = None) -> dict:
+def _render(data: dict, actions: list | None = None, page_hidden: bool = False) -> dict:
+    env = {**__import__("os").environ, "ACTIONS": json.dumps(actions or [])}
+    if page_hidden:
+        env["PAGE_HIDDEN"] = "1"
     out = subprocess.run(["node", "-e", HARNESS, str(JS)], input=json.dumps(data), capture_output=True, text=True,
-                         check=True, encoding="utf-8", env={**__import__("os").environ, "ACTIONS": json.dumps(actions or [])})
+                         check=True, encoding="utf-8", env=env)
     return json.loads(out.stdout)
 
 

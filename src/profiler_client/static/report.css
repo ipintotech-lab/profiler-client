@@ -410,3 +410,61 @@
 .sheet .fl-legend .fl-k.loop { border-top: 2px dashed var(--estimate); }
 .sheet .fl-legend .fl-k.tint { height: 10px; width: 10px; border: 1px solid var(--rule); background: rgba(58, 62, 158, .25); }
 @media (prefers-reduced-motion: reduce) { .sheet .fl-dot { display: none; } }
+
+/* the live demo: a dark trading terminal, the same in both themes */
+.sheet .lv-note { margin-top: 16px; font-size: 14px; color: var(--ink-2); }
+.sheet .lv-term { --lv-bg: #0b0e17; --lv-panel: #121726; --lv-line: #232a3f; --lv-ink: #e6e9f2; --lv-dim: #8a93ad; --lv-up: #ff5d5d; --lv-down: #2fd27f; --lv-amber: #ffc24b; --lv-save: #4cc9f0; --lv-brand: #9da2ff;
+  margin-top: 12px; background: var(--lv-bg); color: var(--lv-ink); border: 1px solid var(--lv-line); border-radius: 12px; overflow: hidden; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.sheet .lv-top { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--lv-line); }
+.sheet .lv-name { font-family: var(--sans); font-weight: 800; }
+.sheet .lv-name b { color: var(--lv-brand); }
+.sheet .lv-live { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; font-weight: 700; color: var(--lv-down); }
+.sheet .lv-live i { width: 8px; height: 8px; border-radius: 50%; background: var(--lv-down); animation: lv-pulse 1.4s infinite; }
+@keyframes lv-pulse { 50% { opacity: .25; } }
+.sheet .lv-ctl { display: flex; gap: 6px; flex-wrap: wrap; }
+.sheet .lv-ctl button { font: 600 12px var(--mono); background: var(--lv-panel); color: var(--lv-ink); border: 1px solid var(--lv-line); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+.sheet .lv-up { color: var(--lv-up); } .sheet .lv-down { color: var(--lv-down); } .sheet .lv-save { color: var(--lv-save); } .sheet .lv-amber { color: var(--lv-amber); } .sheet .lv-dim { color: var(--lv-dim); }
+.sheet .lv-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--lv-line); }
+@media (max-width: 860px) { .sheet .lv-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.sheet .lv-kpi { background: var(--lv-panel); border: 1px solid var(--lv-line); border-radius: 10px; padding: 12px; display: grid; gap: 4px; min-width: 0; }
+.sheet .lv-krow { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.sheet .lv-l { font: 600 11px var(--sans); color: var(--lv-dim); letter-spacing: .08em; text-transform: uppercase; }
+.sheet .lv-v { font-size: 23px; font-weight: 700; line-height: 1.15; }
+.sheet .lv-u { font-size: 12px; color: var(--lv-dim); font-weight: 500; }
+.sheet .lv-c { font-size: 11.5px; }
+.sheet .lv-badge { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 99px; background: #1c2234; color: var(--lv-dim); white-space: nowrap; }
+.sheet .lv-badge.up { background: #2a1b22; color: var(--lv-up); } .sheet .lv-badge.down { background: #123222; color: var(--lv-down); }
+.sheet .lv-badge.save { background: #10303d; color: var(--lv-save); } .sheet .lv-badge.amber { background: #3a2d10; color: var(--lv-amber); }
+.sheet .lv-spark { width: 100%; height: 30px; display: block; }
+.sheet .lv-spark .f { fill: rgba(157, 162, 255, .18); } .sheet .lv-spark .l { fill: none; stroke: var(--lv-brand); stroke-width: 1.6; vector-effect: non-scaling-stroke; } .sheet .lv-spark circle { fill: var(--lv-brand); }
+.sheet .lv-spark.amber .f { fill: rgba(255, 194, 75, .16); } .sheet .lv-spark.amber .l { stroke: var(--lv-amber); } .sheet .lv-spark.amber circle { fill: var(--lv-amber); }
+.sheet .lv-meter { position: relative; height: 10px; border-radius: 99px; background: #1c2234; margin: 10px 0 8px; }
+.sheet .lv-meter span { position: absolute; inset: 0 auto 0 0; border-radius: 99px; background: var(--lv-save); transition: width .4s; }
+.sheet .lv-meter i { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--lv-ink); opacity: .7; }
+.sheet .lv-hhead { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px; padding: 10px 14px 0; font: 600 11px var(--sans); color: var(--lv-dim); letter-spacing: .06em; text-transform: uppercase; }
+.sheet .lv-heat { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 8px 14px 12px; border-bottom: 1px solid var(--lv-line); }
+@media (max-width: 640px) { .sheet .lv-heat { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.sheet .lv-tile { border: 1px solid var(--lv-line); border-radius: 10px; padding: 10px 12px; cursor: pointer; display: grid; gap: 2px; min-width: 0; text-align: left; color: var(--lv-ink); font: inherit; background: var(--lv-panel); }
+.sheet .lv-tile.sel { outline: 2px solid var(--lv-brand); outline-offset: -1px; }
+.sheet .lv-th, .sheet .lv-meta { display: flex; justify-content: space-between; gap: 6px; }
+.sheet .lv-meta { font-size: 11.5px; }
+.sheet .lv-sym { color: var(--lv-brand); font-weight: 700; }
+.sheet .lv-nm { font: 11px var(--sans); color: var(--lv-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet .lv-big { font-size: 18px; font-weight: 700; }
+.sheet .lv-big .lv-dim { font-size: 11px; font-weight: 500; }
+.sheet .lv-tile .lv-spark { height: 22px; }
+.sheet .lv-grid { display: grid; grid-template-columns: 1.55fr 1fr; }
+@media (max-width: 900px) { .sheet .lv-grid { grid-template-columns: 1fr; } }
+.sheet .lv-panel { padding: 12px 14px; border-right: 1px solid var(--lv-line); min-width: 0; }
+.sheet .lv-grid > .lv-panel:last-child { border-right: 0; }
+.sheet .lv-panel h3 { display: flex; justify-content: space-between; gap: 8px; font: 600 11px var(--sans); color: var(--lv-dim); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 8px; }
+.sheet .lv-canvas { width: 100%; height: 230px; display: block; }
+.sheet .lv-tape { list-style: none; margin: 0; padding: 0; font-size: 12px; height: 230px; overflow: hidden; }
+.sheet .lv-tape li { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--lv-line); }
+.sheet .lv-tape li.is-save { background: rgba(76, 201, 240, .08); }
+.sheet .lv-st { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet .lv-tape .step { color: inherit; }
+.sheet .lv-foot { padding: 8px 14px; border-top: 1px solid var(--lv-line); font-size: 11.5px; color: var(--lv-dim); display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.sheet .lv-empty { padding: 16px; color: var(--lv-dim); }
+@media (prefers-reduced-motion: reduce) { .sheet .lv-live i, .sheet .lv-meter span { animation: none; transition: none; } }
+@media print { .sheet .lv-term { display: none; } }
