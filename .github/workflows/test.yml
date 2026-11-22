@@ -21,6 +21,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e '.[dev]' ruff
       - run: ruff check src tests scripts
+      - run: python scripts/check_version.py
       - run: pytest -q
 
   test-windows:

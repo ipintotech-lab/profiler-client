@@ -5,7 +5,7 @@ that ``pip install`` made (on Windows ``profiler-client.exe``) as a separate
 process, on a sample trace whose path has spaces and non-ASCII letters, with
 the console's own code page, and checks what a user would see:
 
-- ``version``, ``check`` and ``check --json`` work;
+- ``version``, ``--version``, ``check`` and ``check --json`` work;
 - ``prepare`` with ``--key-file`` writes a dataset that ``validate`` and
   ``inspect`` accept, the key file is DPAPI-protected on Windows (hex
   elsewhere), and a second ``prepare`` with the same key file reuses the key;
@@ -78,6 +78,8 @@ def check_cli(root: Path, env: dict) -> None:
     version = run(env, "version").stdout
     if not re.search(r"profiler-client \d+\.\d+\.\d+", version):
         fail(f"unexpected version output: {version!r}")
+    if run(env, "--version").stdout != version:
+        fail("--version and version print different things")
 
     run(env, "check", str(trace))
     summary = json.loads(run(env, "check", "--json", str(trace)).stdout)
