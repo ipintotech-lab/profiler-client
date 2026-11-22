@@ -1247,9 +1247,310 @@ function renderReport(root, data, { name = '', meta = [], showEvent = null, decl
   q('notes').textContent = sm.notes || '';
 }
 
+// ---- Agent flow (issue #59): one workflow's agents, its router's decisions and handoffs as the graph builder laid
+// them out, with Openly7's remarks pinned to them. Remarks come from the findings: the priced ones are exactly the
+// counted findings, so they add up to the workflow's headline; the rest say what they are (also found, not priced,
+// for information). Animations: traffic along each handoff by its share of runs, a typical run (the most common
+// path, with average costs: the report holds no single run), and "what if", which takes each box's counted saving
+// off. They stop for readers who ask for reduced motion, and never use animation frames (they stall in background tabs).
+
+const FLOW_TABS = `
+  <div class="sv-tabs" role="tablist" aria-label="Report views" data-r="tabs">
+    <button type="button" role="tab" id="tab-savings" data-view="savings" aria-selected="true" aria-controls="view-savings">Savings report</button>
+    <button type="button" role="tab" id="tab-flow" data-view="flow" aria-selected="false" aria-controls="view-flow" tabindex="-1">Agent flow</button>
+  </div>`;
+const FLOW_VIEW = `
+  <div class="fl-none" data-r="flowNone" hidden></div>
+  <div data-r="flowBody">
+    <div class="fl-bar">
+      <p class="fl-sum" data-r="flowSum"></p>
+      <label class="fl-pick" data-r="flowPickWrap" hidden>Workflow <select data-r="flowPick"></select></label>
+    </div>
+    <div class="fl-ctl">
+      <button type="button" class="fl-btn" data-r="flowPlay">▶ Play a typical run</button>
+      <label><input type="checkbox" data-r="flowWhatIf"> What if we apply the counted remarks</label>
+      <label><input type="checkbox" data-r="flowTraffic"> Traffic</label>
+      <label><input type="checkbox" data-r="flowSafe"> Share-safe: neutral labels instead of names</label>
+    </div>
+    <p class="fl-run" data-r="flowRun" hidden></p>
+    <div class="fl-grid">
+      <div class="fl-card">
+        <div class="fl-scroll"><svg class="fl-svg" data-r="flowSvg" role="img" aria-labelledby="fl-title" viewBox="0 0 920 440">
+          <title id="fl-title">Agent flow: the router’s decisions, the agents they hand work to, and Openly7’s numbered remarks</title>
+          <g data-r="flowBase"></g><g data-r="flowTrafficLayer"></g><g data-r="flowToken"></g><g data-r="flowPins"></g>
+        </svg></div>
+        <p class="sv-legend fl-legend"><span><i class="fl-k hand"></i>hands work to (width = share of runs)</span><span><i class="fl-k reads"></i>a decision reads its result</span><span><i class="fl-k loop"></i>back to an earlier agent</span><span><i class="fl-k tint"></i>agent tint = its share of spend</span></p>
+      </div>
+      <div class="fl-card">
+        <h3>Openly7 remarks</h3>
+        <ol class="fl-remarks" data-r="flowRemarks"></ol>
+        <p class="why">The diagram holds structure, counts and costs only: no prompts, inputs or outputs. With share-safe on, it shows neutral labels (Agent A, Decision 1, Step 1) instead of names, so you can send it outside your company.</p>
+      </div>
+    </div>
+  </div>`;
+
+const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// the workflows with an agent flow to draw: more than one agent, and a layout
+const flowWorkflows = data => Object.entries(data.reports || {})
+  .filter(([, r]) => (r?.graph?.agent_graph?.agents || []).length > 1 && r.graph.agent_graph.layout)
+  .sort((a, b) => (b[1].summary?.totals?.cost || 0) - (a[1].summary?.totals?.cost || 0)).map(([n]) => n);
+
+function flowModel(rep) {
+  const g = rep.graph, ag = g.agent_graph, layout = ag.layout, runs = g.run_count || 0;
+  const box = new Map((layout.boxes || []).map(b => [b.id, b]));
+  const agents = new Map(ag.agents.map(a => [a.id, { ...a, save: 0 }]));
+  const decisions = new Map((ag.decisions || []).map(d => [d.id, d]));
+  // which agent a counted finding's saving belongs to: the analysis names it on the matching opportunity;
+  // else the one agent whose steps hold the finding's step
+  const oppAgent = new Map((rep.summary?.opportunities || []).map(o => [[o.type, o.title, (o.saving || 0).toFixed(6)].join('\u0000'), o.identity?.agent]));
+  const stepAgents = step => ag.agents.filter(a => (a.step_ids || []).some(s => s === step || s.startsWith(step + ' @ '))).map(a => a.id);
+  const counted = (rep.summary?.findings || []).filter(f => f.counted && f.saving);
+  let unattributed = 0;
+  for (const f of counted) {
+    // the finding's own agent when the server names it; else its opportunity's; else the one agent with the step
+    const named = f.agent || oppAgent.get([f.type, f.title, (f.saving || 0).toFixed(6)].join('\u0000'));
+    const owners = named && agents.has(named) ? [named] : stepAgents((f.nodes || [f.title])[0]);
+    if (owners.length === 1) agents.get(owners[0]).save += f.saving; else unattributed += f.saving;
+  }
+  const total = rep.summary?.totals?.cost || 0, saved = rep.summary?.replaceable?.cost || 0;
+  return { ag, layout, box, runs, agents, decisions, router: ag.router && agents.get(ag.router), total, saved, unattributed,
+           links: ag.links || [], frames: layout.frames || [], findings: rep.summary?.findings || [],
+           opps: rep.summary?.opportunities || [] };
+}
+
+// the remarks: priced ones (the counted findings, by where they sit) first, then the rest
+function flowRemarks(m) {
+  const out = [], top = id => { const b = m.box.get(id); return b ? [b.x + b.w - 8, b.y + 8] : [16, 16]; };
+  const r = m.router;
+  if (r) {
+    const share = m.total ? r.cost / m.total : 0;
+    if (r.save > 1e-9) out.push({ at: [m.box.get(r.id)?.x + m.box.get(r.id)?.w - 14 || 890, 28], on: [r.id], save: r.save,
+      title: `The router takes ${share >= 0.01 ? Math.round(share * 100) + '%' : '<1%'} of the spend`,
+      text: n => `Calls of ${n(r.id)} made the same choice for the same input every time. A rule could make them.` });
+  }
+  const others = [...m.agents.values()].filter(a => a.id !== m.ag.router && a.save > 1e-9).sort((a, b) => b.save - a.save);
+  if (others.length) {
+    const sum = others.reduce((s, a) => s + a.save, 0);
+    out.push({ at: top(others[0].id), on: others.map(a => a.id), save: sum,
+      title: others.length > 1 ? 'The agents’ own routing calls repeat too' : `${others[0].id}’s calls repeat`,
+      text: n => `${andList(others.map(a => `${n(a.id)} ${money(a.save)}`))}: their LLM calls pick the same next step for the same input.` });
+  }
+  if (m.unattributed > 1e-9) out.push({ at: [16, 16], on: [], save: m.unattributed, title: 'Counted on steps several agents share',
+    text: () => 'Repeated choices on steps more than one agent runs; this report doesn’t say which agent’s calls they are.' });
+  // not priced: the same data fetched by several agents, findings that add nothing, rare but costly agents, loops back
+  for (const o of m.opps.filter(o => o.type === 'CROSS_AGENT_DUPLICATE' && (o.agents || []).length > 1).slice(0, 2))
+    out.push({ at: top(o.agents[0]), on: o.agents.filter(a => m.box.has(a)), save: null, note: 'Not priced yet',
+      title: 'Agents fetch the same data', text: n => `${andList(o.agents.map(n))} ${o.agents.length === 2 ? 'both' : 'all'} call ${n(o.title)} in the same run. Fetch it once and pass it in the handoff.` });
+  const also = m.findings.filter(f => !f.counted && f.saving && (f.covered_by != null || f.held_out === 'overlap')).sort((a, b) => b.saving - a.saving)[0];
+  if (also) {
+    const at = (also.nodes || []).map(s => [...m.decisions.keys()].find(d => d === s)).find(Boolean);
+    out.push({ at: at ? top(at) : [16, 16], on: at ? [at] : [], save: null, note: 'Adds nothing to the total',
+      title: TITLE[also.type] || 'Also found', text: n => `${n(also.title)} saves ${money(also.saving)} on its own, but its calls are already counted above.` });
+  }
+  const perRun = a => a.runs ? a.cost / a.runs : 0;
+  const typical = [...m.agents.values()].map(perRun).filter(Boolean).sort((a, b) => a - b);
+  const median = typical[Math.floor(typical.length / 2)] || 0;
+  for (const a of m.agents.values()) {
+    if (a.id !== m.ag.router && m.runs && a.runs <= m.runs / 4 && median && perRun(a) >= 3 * median)
+      out.push({ at: top(a.id), on: [a.id], save: null, note: 'For information', title: 'Rare but costly',
+        text: n => `${n(a.id)} ran in ${a.runs} of ${m.runs} runs, at about ${money(perRun(a))} a run: ${Math.round(perRun(a) / median)}× the typical agent’s.` });
+  }
+  for (const l of m.links.filter(l => l.kind === 'direct' && l.mode === 'return'))
+    out.push({ at: top(l.from_agent), on: [l.from_agent, l.to_agent], save: null, note: 'For information', title: 'A loop back',
+      text: n => `${n(l.from_agent)} handed work back to ${n(l.to_agent)} in ${plural(l.loop?.runs ?? l.runs, 'run')}. Nothing to save; shown so the path isn’t a surprise.` });
+  return out;
+}
+
+// a curve from the bottom of one box to the top of another, and a loop for a hand back
+const flowCurve = (a, b) => { const x1 = a.x + a.w / 2, y1 = a.y + a.h, x2 = b.x + b.w / 2, y2 = b.y;
+  return `M${x1} ${y1} C ${x1} ${y1 + 45}, ${x2} ${y2 - 45}, ${x2} ${y2 - 2}`; };
+const flowLoop = (a, b) => `M${a.x + 8} ${a.y + 10} C ${a.x - 26} ${a.y - 20}, ${b.x - 26} ${b.y + b.h + 20}, ${b.x + 8} ${b.y + b.h - 4}`;
+
+// the most common path: from the router's first decision, each decision's busiest handoff (and the agents it
+// starts together), skipping decisions that read only agents the path didn't reach. Costs are averages.
+function flowTypicalRun(m) {
+  const decs = [...m.decisions.values()].sort((a, b) => (m.box.get(a.id)?.x ?? 0) - (m.box.get(b.id)?.x ?? 0));
+  const seen = new Set(m.router ? [m.router.id] : []), steps = [];  // the run starts at the router
+  const routerOwn = m.router ? Math.max(0, m.router.cost - decs.reduce((s, d) => s + (d.cost || 0), 0)) / (m.runs || 1) : 0;
+  if (m.router) steps.push([[m.router.id], routerOwn / 2]);
+  for (const d of decs) {
+    const reads = m.links.filter(l => l.kind === 'reads' && l.decision === d.id).map(l => l.from_agent);
+    if (reads.length && !reads.some(a => seen.has(a))) continue;
+    const hands = m.links.filter(l => l.kind === 'handoff' && l.decision === d.id && m.agents.has(l.to_agent));
+    if (!hands.length) continue;
+    const best = Math.max(...hands.map(l => l.share || 0));
+    const to = hands.filter(l => (l.share || 0) === best || (l.mode === 'both' && (l.share || 0) >= best - 1e-9)).map(l => l.to_agent);
+    steps.push([[d.id], (d.cost || 0) / (d.calls || 1)]);
+    steps.push([to, to.reduce((s, a) => s + (m.agents.get(a).cost / (m.agents.get(a).runs || 1)), 0)]);
+    to.forEach(a => seen.add(a));
+  }
+  if (m.router) steps.push([[m.router.id], routerOwn / 2]);
+  return steps;
+}
+
+function flowBase(m, s) {
+  const lab = id => esc(s.label(id)), fit = (t, n) => t.length > n ? t.slice(0, n - 1) + '…' : t;
+  const on = new Set(s.active >= 0 ? s.remarks[s.active].on : []), cls = (base, id) => base + (on.has(id) ? ' hl' : '') + (s.live.has(id) ? ' is-live' : '');
+  const parts = ['<defs><marker id="fl-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="fl-arrow"></path></marker></defs>'];
+  for (const f of m.frames) parts.push(`<rect class="fl-frame" x="${f.x}" y="${f.y}" width="${f.w}" height="${f.h}" rx="10"></rect><text class="fl-flabel" x="${f.x + 6}" y="${f.y + f.h - 6}">start together</text>`);
+  for (const l of m.links) {
+    if (l.kind === 'reads' && m.box.has(l.from_agent) && m.box.has(l.decision)) {
+      const a = m.box.get(l.from_agent), d = m.box.get(l.decision);
+      parts.push(`<path class="fl-reads" d="M${a.x + a.w / 2 + 18} ${a.y} C ${a.x + a.w / 2 + 18} ${a.y - 50}, ${d.x + d.w / 2 + 18} ${d.y + d.h + 50}, ${d.x + d.w / 2 + 18} ${d.y + d.h}"></path>`);
+    } else if (l.kind === 'handoff' && m.box.has(l.decision) && m.box.has(l.to_agent)) {
+      const d = m.box.get(l.decision), a = m.box.get(l.to_agent), sh = l.share || 0;
+      parts.push(`<path class="fl-hand" stroke-width="${(1 + sh * 3.5).toFixed(2)}" marker-end="url(#fl-arr)" d="${flowCurve(d, a)}"></path>`);
+      if (sh < 1) parts.push(`<text class="fl-share" x="${(d.x + d.w / 2 + a.x + a.w / 2) / 2 + 4}" y="${(d.y + d.h + a.y) / 2 + 4}">${Math.round(sh * 100)}%</text>`);
+    } else if (l.kind === 'direct' && m.box.has(l.from_agent) && m.box.has(l.to_agent)) {
+      parts.push(`<path class="fl-back" marker-end="url(#fl-arr)" d="${flowLoop(m.box.get(l.from_agent), m.box.get(l.to_agent))}"></path>`);
+    }
+  }
+  const rb = m.router && m.box.get(m.router.id);
+  if (rb) {
+    const c = m.router.cost - m.router.save * s.whatIf;
+    parts.push(`<g class="${cls('fl-router', m.router.id)}"><rect x="${rb.x}" y="${rb.y}" width="${rb.w}" height="${rb.h}" rx="6"></rect>` +
+      `<text x="${rb.x + 10}" y="${rb.y + 16}">${lab(m.router.id)} · router · ${money(c)}${s.whatIf && m.router.save ? ` (rules save ${money(m.router.save * s.whatIf)})` : ` · ${share(m.router.cost, m.total)} of spend`}</text></g>`);
+  }
+  for (const d of m.decisions.values()) {
+    const b = m.box.get(d.id); if (!b) continue;
+    parts.push(`<g class="${cls('fl-dec', d.id)}"><rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="8"></rect>` +
+      `<text class="t1" x="${b.x + 8}" y="${b.y + 22}">${esc(fit(s.label(d.id), 20))}</text><text class="t2" x="${b.x + 8}" y="${b.y + 42}">${plural(d.calls, 'call')}</text>` +
+      `<text class="t2" x="${b.x + 8}" y="${b.y + 58}">${money(d.cost)}</text></g>`);
+  }
+  for (const a of m.agents.values()) {
+    const b = m.box.get(a.id); if (!b || a.id === m.ag.router) continue;
+    const cut = a.save * s.whatIf, h = a.cost ? b.h * (cut / a.cost) : 0;
+    parts.push(`<g class="${cls('fl-agent', a.id)}"><rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="10" class="fl-bg"></rect>` +
+      `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="10" class="fl-tint" fill-opacity="${(0.04 + (a.share || 0) * 1.4).toFixed(3)}"></rect>` +
+      (h > 0.5 ? `<rect x="${b.x + 1}" y="${(b.y + b.h - h - 1).toFixed(1)}" width="${b.w - 2}" height="${h.toFixed(1)}" rx="6" class="fl-saved"></rect>` : '') +
+      `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="10" class="fl-edge"></rect>` +
+      `<text class="t1" x="${b.x + 10}" y="${b.y + 22}">${esc(fit(s.label(a.id), 19))}</text><text class="t2" x="${b.x + 10}" y="${b.y + 42}">${a.runs} of ${m.runs} runs</text>` +
+      `<text class="t2${cut ? ' t-save' : ''}" x="${b.x + 10}" y="${b.y + 58}">${cut ? `${money(a.cost - cut)} · −${money(cut)}` : `${money(a.cost)} · ${share(a.cost, m.total)}`}</text></g>`);
+  }
+  return parts.join('');
+}
+
+function flowTraffic(m) {
+  const dots = [];
+  const along = (d, n, dur, cls) => { for (let i = 0; i < n; i++)
+    dots.push(`<circle r="3.2" class="${cls}"><animateMotion dur="${dur}s" repeatCount="indefinite" begin="${(-i * dur / n).toFixed(2)}s" path="${d}"></animateMotion></circle>`); };
+  for (const l of m.links) {
+    if (l.kind === 'handoff' && m.box.has(l.decision) && m.box.has(l.to_agent))
+      along(flowCurve(m.box.get(l.decision), m.box.get(l.to_agent)), Math.max(1, Math.round((l.share || 0) * 4)), 3.2, 'fl-dot');
+    if (l.kind === 'direct' && l.mode === 'return' && m.box.has(l.from_agent) && m.box.has(l.to_agent))
+      along(flowLoop(m.box.get(l.from_agent), m.box.get(l.to_agent)), 1, 4, 'fl-dot loop');
+  }
+  return dots.join('');
+}
+
+function renderFlow(q, data) {
+  const names = flowWorkflows(data);
+  q('flowNone').hidden = names.length > 0;
+  q('flowBody').hidden = !names.length;
+  if (!names.length) {
+    q('flowNone').innerHTML = '<p>No agent flow to draw: each workflow in this dataset has one agent, so nothing hands work to anything else. Open a workflow from the savings report to see its steps.</p>';
+    return null;
+  }
+  const s = { active: -1, whatIf: 0, live: new Set(), traffic: !reduceMotion(), remarks: [], label: x => x, timer: null, run: null };
+  let m = null;
+  // share-safe: neutral labels instead of names (the router, Agent A.., Decision 1.., Step 1..), so a shared diagram
+  // holds no name and no pseudonym anyone could match; labels follow the layout, left to right
+  let safeLabels = new Map();
+  const safeFor = id => {
+    if (!safeLabels.has(id)) safeLabels.set(id, `Step ${[...safeLabels.values()].filter(v => v.startsWith('Step')).length + 1}`);
+    return safeLabels.get(id);
+  };
+  const shortName = id => q('flowSafe').checked ? safeFor(id) : plainName(id);
+  const draw = () => {
+    s.label = shortName;
+    q('flowBase').innerHTML = flowBase(m, s);
+    const n = id => `<code>${esc(s.label(id))}</code>`;
+    q('flowRemarks').innerHTML = s.remarks.map((r, i) => `<li data-i="${i}" class="${i === s.active ? 'on' : ''}">` +
+      `<button type="button" class="fl-n${r.save == null ? ' plain' : ''}" data-i="${i}" aria-pressed="${i === s.active}">${i + 1}</button>` +
+      `<span><b>${esc(r.title)}</b> ${r.text(n)}<br>${r.save != null ? `<span class="fl-sv">${money(r.save)}</span> <span class="pill ${TIER.medium[0]}">counted</span>` : `<span class="note">${esc(r.note || '')}</span>`}</span></li>`).join('');
+    q('flowPins').innerHTML = s.remarks.map((r, i) => `<g class="fl-pin${r.save == null ? ' plain' : ''}${i === s.active ? ' on' : ''}"><circle cx="${r.at[0]}" cy="${r.at[1]}" r="11"></circle>` +
+      `<text x="${r.at[0]}" y="${r.at[1] + 4}" text-anchor="middle">${i + 1}</text></g>`).join('');
+    const now = m.total - m.saved * s.whatIf;
+    q('flowSum').innerHTML = s.whatIf ? `<b>${money(now)}</b> after the counted remarks (was ${money(m.total)}, −${share(m.saved * s.whatIf, m.total)})`
+      : `<b>${money(m.total)}</b> spent · ${money(m.saved)} (${share(m.saved, m.total)}) could be saved` +
+        (m.saved ? ` <span class="pill ${(m.findings.some(f => f.counted && f.risk === 'low') ? TIER.low : TIER.medium)[0]}">${m.findings.every(f => !f.counted || f.risk !== 'low') ? 'All review first' : 'Partly ready'}</span>` : '');
+  };
+  const load = wf => {
+    stopRun();
+    m = flowModel(data.reports[wf]);
+    const byX = ids => ids.sort((a, b) => (m.box.get(a)?.x ?? 0) - (m.box.get(b)?.x ?? 0) || (m.box.get(a)?.y ?? 0) - (m.box.get(b)?.y ?? 0));
+    safeLabels = new Map([
+      ...(m.router ? [[m.router.id, 'Router']] : []),
+      ...byX([...m.agents.keys()].filter(id => id !== m.ag.router)).map((id, i) => [id, `Agent ${String.fromCharCode(65 + i % 26)}${i >= 26 ? Math.floor(i / 26) : ''}`]),
+      ...byX([...m.decisions.keys()]).map((id, i) => [id, `Decision ${i + 1}`]),
+    ]);
+    s.remarks = flowRemarks(m); s.active = -1; s.whatIf = 0; q('flowWhatIf').checked = false;
+    const L = m.layout; q('flowSvg').setAttribute('viewBox', `0 0 ${L.width || 920} ${L.height || 440}`);
+    q('flowTrafficLayer').innerHTML = s.traffic ? flowTraffic(m) : '';
+    draw();
+  };
+  // what if: each box's counted saving comes off over a second, on timers
+  const tween = to => {
+    clearTimeout(s.timer);
+    const from = s.whatIf, t0 = Date.now(), ms = reduceMotion() ? 0 : 900;
+    const step = () => { const k = ms ? Math.min(1, (Date.now() - t0) / ms) : 1; s.whatIf = from + (to - from) * (1 - Math.pow(1 - k, 3)); draw();
+      if (k < 1) s.timer = setTimeout(step, 16); };
+    step();
+  };
+  const stopRun = () => { clearTimeout(s.run); s.run = null; s.live = new Set(); q('flowToken').innerHTML = ''; q('flowRun').hidden = true;
+    q('flowPlay').textContent = '▶ Play a typical run'; if (m) draw(); };
+  const playRun = () => {
+    stopRun();
+    const steps = flowTypicalRun(m); let i = 0, cost = 0;
+    q('flowRun').hidden = false; q('flowPlay').textContent = '■ Stop';
+    const next = () => {
+      if (i >= steps.length) { q('flowRun').textContent = `A typical run: ${steps.length} steps, about ${money(cost)}. The most common path, with average costs; not a recorded run.`;
+        s.live = new Set(); draw(); s.run = setTimeout(stopRun, 2600); return; }
+      const [ids, c] = steps[i]; cost += c;
+      const cs = ids.map(id => m.box.get(id)).filter(Boolean).map(b => [b.x + b.w / 2, b.y + b.h / 2]);
+      const [x, y] = [cs.reduce((a, p) => a + p[0], 0) / cs.length, cs.reduce((a, p) => a + p[1], 0) / cs.length];
+      q('flowToken').innerHTML = `<circle class="fl-token" r="7" cx="${x}" cy="${y}"></circle>`;
+      s.live = new Set(ids); draw();
+      q('flowRun').textContent = `A typical run, step ${i + 1} of ${steps.length}: ${ids.map(id => s.label(id)).join(' + ')} · about ${money(cost)} so far`;
+      i++; s.run = setTimeout(next, reduceMotion() ? 1400 : 1100);
+    };
+    next();
+  };
+  const select = i => { s.active = i === s.active ? -1 : i; draw(); };
+  q('flowRemarks').addEventListener('click', e => { const b = e.target.closest('[data-i]'); if (b) select(+b.dataset.i); });
+  q('flowPlay').addEventListener('click', () => s.run ? stopRun() : playRun());
+  q('flowWhatIf').addEventListener('change', e => tween(e.target.checked ? 1 : 0));
+  q('flowTraffic').checked = s.traffic;
+  q('flowTraffic').addEventListener('change', e => { s.traffic = e.target.checked; q('flowTrafficLayer').innerHTML = s.traffic ? flowTraffic(m) : ''; });
+  q('flowSafe').addEventListener('change', draw);
+  q('flowPickWrap').hidden = names.length < 2;
+  q('flowPick').innerHTML = names.map(n => `<option value="${esc(n)}">${esc(plainName(n))}</option>`).join('');
+  q('flowPick').addEventListener('change', e => load(e.target.value));
+  load(names[0]);
+  return { model: () => m, remarks: () => s.remarks, typicalRun: () => flowTypicalRun(m), stop: stopRun };
+}
+
+// the overview's two views, as tabs: click, arrow keys, Home and End; one tab in the tab order
+function wireTabs(q, onShow) {
+  const views = { savings: q('viewSavings'), flow: q('viewFlow') };
+  const tabs = { savings: q('tabs').querySelector('[data-view="savings"]'), flow: q('tabs').querySelector('[data-view="flow"]') };
+  const order = ['savings', 'flow'];
+  const show = v => { for (const k of order) { const on = k === v; tabs[k].setAttribute('aria-selected', String(on)); tabs[k].tabIndex = on ? 0 : -1; views[k].hidden = !on; } onShow(v); };
+  q('tabs').addEventListener('click', e => { const b = e.target.closest('[data-view]'); if (b) show(b.dataset.view); });
+  q('tabs').addEventListener('keydown', e => {
+    const at = order.findIndex(k => tabs[k] === e.target); if (at < 0) return;
+    const to = { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: order.length - 1 }[e.key]; if (to == null) return;
+    e.preventDefault(); const v = order[(to + order.length) % order.length]; tabs[v].focus(); show(v);
+  });
+  show('savings');
+  return show;
+}
+
 // The savings overview: what the dataset could save, what to do first, and where. Every figure is a finding the
 // server's analysis counts in its headline (each call counted once); "Also found" findings are shown but never added.
-const OVERVIEW = HEAD + `
+const OVERVIEW = HEAD + FLOW_TABS + `
+  <div id="view-savings" role="tabpanel" aria-labelledby="tab-savings" data-r="viewSavings">
   <div class="sv-hero">
     <div class="sv-card">
       <p class="sv-big" data-r="svBig"></p>
@@ -1287,7 +1588,10 @@ const OVERVIEW = HEAD + `
     <summary>Details for engineers</summary>
     <ul class="risks" data-r="risks" hidden aria-label="Findings by risk"></ul>
     <p class="totals" data-r="totals"></p>
-  </details>` + FOOT;
+  </details>
+  </div>
+  <div id="view-flow" role="tabpanel" aria-labelledby="tab-flow" data-r="viewFlow" hidden>` + FLOW_VIEW + `
+  </div>` + FOOT;
 
 // a risk in words, never color alone
 const TIER = { low: ['ready', 'Ready · low risk'], medium: ['review', 'Review first'], high: ['invest', 'Investigate'] };
@@ -1472,6 +1776,8 @@ function renderOverview(root, data, { name = '', meta = [], showEvent = null, de
     const runs = (o.workflows || []).reduce((n, r) => n + (r.runs || 0), 0);
     q('totals').innerHTML = `${money(o.totals?.spend)} <span class="k">across</span> ${plural(runs, 'run')} <span class="k">in</span> ${plural((o.workflows || []).length, 'workflow')}.`;
     renderOverviewRows(q, o, data.reports);
+    const flow = renderFlow(q, data);
+    wireTabs(q, v => { if (v !== 'flow') flow?.stop(); });
     q('workflows').addEventListener('click', e => {
       const b = e.target.closest('button[data-wf]');
       if (b) show(b.dataset.wf);

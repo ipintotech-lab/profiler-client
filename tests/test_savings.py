@@ -291,7 +291,7 @@ def test_view_keeps_what_the_savings_page_and_all_findings_draw(fixture):
         assert "risk_totals" in summary and summary["findings"]
         for f in summary["findings"]:
             assert set(f) <= {"type", "title", "nodes", "action", "saving", "observations", "risk", "risk_reasons",
-                              "counted", "covered_by", "held_out"}
+                              "counted", "covered_by", "held_out", "agent"}
 
 
 def test_view_keeps_what_marks_an_estimated_cost(fixture):
