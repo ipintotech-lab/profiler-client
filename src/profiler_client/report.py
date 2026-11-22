@@ -183,7 +183,7 @@ def _workflow_view(report: dict) -> dict:
     if "findings" in _pick(report.get("summary"), ("findings",)):
         summary["findings"] = [
             _pick(f, ("type", "title", "nodes", "action", "saving", "observations", "risk", "risk_reasons",
-                      "counted", "covered_by", "held_out"))
+                      "counted", "covered_by", "held_out", "agent"))
             for f in _list(report["summary"]["findings"]) if isinstance(f, dict)]
     if "next_steps" in _pick(report.get("summary"), ("next_steps",)):
         summary["next_steps"] = [
