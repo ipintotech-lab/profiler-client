@@ -276,6 +276,27 @@ def test_stopping_the_app_deletes_the_files_it_copied(tmp_path):
     assert not list(tmp_path.glob("profiler-client-app-*"))
 
 
+@pytest.mark.skipif(os.name == "nt", reason="a process can't be sent SIGINT on Windows; Ctrl+C there is checked by hand (#58)")
+def test_ctrl_c_deletes_the_files_it_copied(tmp_path):
+    # Ctrl+C is SIGINT, which Python's own handler raises as KeyboardInterrupt: not the SIGTERM
+    # handler the test above goes through
+    env = {**os.environ, "TMPDIR": str(tmp_path), "XDG_DATA_HOME": str(tmp_path / "data")}
+    proc = subprocess.Popen([sys.executable, "-m", "profiler_client.cli", "app", "--no-browser"],
+                            stdout=subprocess.PIPE, text=True, env=env, encoding="utf-8",
+                            preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
+    try:
+        assert re.search(r"http://127\.0\.0\.1:\d+/\?t=", proc.stdout.readline() + proc.stdout.readline()
+                         + proc.stdout.readline())
+        [workdir] = tmp_path.glob("profiler-client-app-*")
+        (workdir / "raw").mkdir(exist_ok=True)
+        (workdir / "raw" / "session.jsonl").write_text("{}\n", encoding="utf-8")  # a file it copied in
+        proc.send_signal(signal.SIGINT)
+        assert proc.wait(timeout=30) == 0
+    finally:
+        proc.kill()
+    assert not workdir.exists()
+
+
 @pytest.mark.skipif(os.name != "nt", reason="console close events exist on Windows only")
 def test_on_windows_closing_the_console_window_deletes_the_files_it_copied(tmp_path):
     # Windows can't send CTRL_CLOSE_EVENT to a test, so call the handler the app registers
