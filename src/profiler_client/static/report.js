@@ -1258,6 +1258,7 @@ const FLOW_TABS = `
   <div class="sv-tabs" role="tablist" aria-label="Report views" data-r="tabs">
     <button type="button" role="tab" id="tab-savings" data-view="savings" aria-selected="true" aria-controls="view-savings">Savings report</button>
     <button type="button" role="tab" id="tab-flow" data-view="flow" aria-selected="false" aria-controls="view-flow" tabindex="-1">Agent flow</button>
+    <button type="button" role="tab" id="tab-live" data-view="live" aria-selected="false" aria-controls="view-live" tabindex="-1">Live demo</button>
   </div>`;
 const FLOW_VIEW = `
   <div class="fl-none" data-r="flowNone" hidden></div>
@@ -1533,9 +1534,9 @@ function renderFlow(q, data) {
 
 // the overview's two views, as tabs: click, arrow keys, Home and End; one tab in the tab order
 function wireTabs(q, onShow) {
-  const views = { savings: q('viewSavings'), flow: q('viewFlow') };
-  const tabs = { savings: q('tabs').querySelector('[data-view="savings"]'), flow: q('tabs').querySelector('[data-view="flow"]') };
-  const order = ['savings', 'flow'];
+  const order = ['savings', 'flow', 'live'];
+  const views = { savings: q('viewSavings'), flow: q('viewFlow'), live: q('viewLive') };
+  const tabs = Object.fromEntries(order.map(v => [v, q('tabs').querySelector(`[data-view="${v}"]`)]));
   const show = v => { for (const k of order) { const on = k === v; tabs[k].setAttribute('aria-selected', String(on)); tabs[k].tabIndex = on ? 0 : -1; views[k].hidden = !on; } onShow(v); };
   q('tabs').addEventListener('click', e => { const b = e.target.closest('[data-view]'); if (b) show(b.dataset.view); });
   q('tabs').addEventListener('keydown', e => {
@@ -1545,6 +1546,225 @@ function wireTabs(q, onShow) {
   });
   show('savings');
   return show;
+}
+
+// ---- Live demo (issue #59): a trading-terminal view that simulates calls with this report's own numbers. Nothing
+// streams: each workflow's calls are its counted findings (their calls and saving per call) plus one group for the
+// rest of its calls and spend, drawn in proportion to the calls, so the simulated spend mix and saveable share are
+// the report's. A seeded generator makes it repeatable. It pauses while its tab or the page is hidden, updates its
+// tiles in place so keyboard focus stays, and runs on timers.
+
+const LIVE_VIEW = `
+  <p class="lv-note">A demo: it <b>simulates</b> calls with this report’s own numbers. Nothing streams anywhere. A real live view needs a client that sends events as they happen.</p>
+  <div class="lv-term" data-r="liveTerm">
+    <div class="lv-top">
+      <span class="lv-name">Openly<b>7</b> · Agent Spend Exchange</span>
+      <span class="lv-live"><i aria-hidden="true"></i>LIVE DEMO</span>
+      <span class="lv-dim" data-r="liveClock">09:00:00</span>
+      <span class="lv-ctl"><button type="button" data-r="livePlay">❚❚ Pause</button><button type="button" data-r="liveSpeed">Speed 20×</button><button type="button" data-r="liveReset">Restart</button></span>
+    </div>
+    <div class="lv-kpis">
+      <div class="lv-kpi"><div class="lv-krow"><span class="lv-l">Spend rate</span><span class="lv-badge" data-r="liveRateChg">–</span></div>
+        <div class="lv-v"><span data-r="liveRate">0.000</span><span class="lv-u"> $/min</span></div>
+        <svg class="lv-spark" data-r="liveSparkRate" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"></svg><div class="lv-c lv-dim">spend per minute, last 30 minutes</div></div>
+      <div class="lv-kpi"><div class="lv-krow"><span class="lv-l">Spent</span><span class="lv-badge dim" data-r="liveCalls">0 calls</span></div>
+        <div class="lv-v" data-r="liveSpend">$0.00</div>
+        <svg class="lv-spark" data-r="liveSparkSpend" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"></svg><div class="lv-c lv-dim" data-r="liveAvg">$0.0000 per call</div></div>
+      <div class="lv-kpi"><div class="lv-krow"><span class="lv-l">Saveable</span><span class="lv-badge save" data-r="liveShare">0% of spend</span></div>
+        <div class="lv-v lv-save" data-r="liveSave">$0.00</div>
+        <div class="lv-meter" data-r="liveMeter" role="img" aria-label="Saveable share of spend"><span data-r="liveMeterFill"></span><i data-r="liveMeterMark"></i></div>
+        <div class="lv-c lv-dim" data-r="liveMeterNote"></div></div>
+      <div class="lv-kpi"><div class="lv-krow"><span class="lv-l">Repeats caught</span><span class="lv-badge amber" data-r="liveRepRate">0 / min</span></div>
+        <div class="lv-v lv-amber" data-r="liveReps">0</div>
+        <svg class="lv-spark amber" data-r="liveSparkReps" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"></svg><div class="lv-c lv-dim">calls a rule, lookup or cache could take</div></div>
+    </div>
+    <div class="lv-hhead"><span>Workflows · tint = share of spend that’s saveable</span><span>select a tile to chart it</span></div>
+    <div class="lv-heat" data-r="liveHeat"></div>
+    <div class="lv-grid">
+      <div class="lv-panel"><h3><span data-r="liveChartTitle">All workflows · spend per minute</span><span>1-minute candles</span></h3>
+        <canvas class="lv-canvas" data-r="liveChart" aria-label="Candlesticks of spend per minute, with the saveable part as a line"></canvas></div>
+      <div class="lv-panel"><h3><span>Call tape</span><span>saveable in blue</span></h3><ul class="lv-tape" data-r="liveTape"></ul></div>
+    </div>
+    <div class="lv-foot"><span><span class="lv-up">▲ red</span>: cost per call rising</span><span><span class="lv-down">▼ green</span>: falling</span><span><span class="lv-save">■ blue</span>: saveable</span></div>
+  </div>`;
+
+// a seeded generator (xorshift32), so a run of the demo, and its tests, can be repeated exactly
+const seeded = seed => { let x = (seed | 0) || 1; return () => { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; return (x >>> 0) / 4294967296; }; };
+// what a counted finding's calls would become, as the savings report names it
+const liveTag = f => f.type === 'CONDITIONAL_LLM_BYPASS' || f.type === 'PARTIAL_LLM_BYPASS' ? (/lookup/i.test(f.action || '') ? 'lookup could decide' : 'rule could decide')
+  : f.type === 'CACHE_RESULT' ? 'repeat: reuse' : f.type === 'CROSS_AGENT_DUPLICATE' ? 'fetch once' : 'saveable';
+// a workflow's ticker: its words' initials, then the rest of its last word (pull-request-review: PRREV)
+const tickerOf = (name, used) => {
+  const words = plainName(name).replace(/^h:/, '').toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+  let t = (words.length > 1 ? words.map(w => w[0]).join('') + words[words.length - 1].slice(1) : words.join('')).slice(0, 5) || 'WF';
+  for (let i = 2; used.has(t); i++) t = t.slice(0, 4) + i;
+  used.add(t); return t;
+};
+
+// each workflow: its spend, its calls, and the groups calls are drawn from
+function liveModel(data) {
+  const used = new Set(), out = [];
+  for (const row of data.overview?.workflows || []) {
+    const rep = data.reports?.[row.name]; if (!rep) continue;
+    const t = rep.summary?.totals || {}, spend = row.spend || t.cost || 0;
+    const calls = (t.llm_calls || 0) + (t.tool_calls || 0) || row.runs || 0;
+    if (!spend || !calls) continue;
+    const saveable = (rep.summary?.findings || []).filter(f => f.counted && f.saving > 0 && f.observations > 0)
+      .map(f => ({ name: f.title, calls: f.observations, cost: f.saving / f.observations, saveable: true, tag: liveTag(f) }));
+    const savedCalls = saveable.reduce((s, x) => s + x.calls, 0), saved = saveable.reduce((s, x) => s + x.calls * x.cost, 0);
+    const rest = Math.max(1, calls - savedCalls);
+    const names = new Set(saveable.map(x => x.name));
+    const shown = Object.values(rep.mine?.by_agent || {}).flatMap(b => b.actions || []).filter(a => !names.has(a.node) && a.occurrences > 0);
+    out.push({ name: row.name, sym: tickerOf(row.name, used), spend, saved, calls,
+               groups: [...saveable, { name: null, calls: rest, cost: Math.max(0, spend - saved) / rest, saveable: false, tag: '' }],
+               shown: shown.length ? shown : [{ node: 'call', occurrences: 1 }] });
+  }
+  return out;
+}
+
+// one simulated call: a workflow by its calls, a group by its calls, a cost around the group's average
+function liveCall(model, rand) {
+  const pick = (items, w) => { let r = rand() * items.reduce((s, x) => s + w(x), 0); for (const x of items) { r -= w(x); if (r <= 0) return x; } return items[items.length - 1]; };
+  const wf = pick(model, w => w.calls), g = pick(wf.groups, x => x.calls);
+  const step = g.name || pick(wf.shown, a => a.occurrences).node;
+  const cost = g.cost * (0.8 + rand() * 0.4);
+  return { wf, step, cost, saving: g.saveable ? cost : 0, tag: g.tag };
+}
+
+// n calls with a seed: each workflow's spend and saveable spend, for checking the mix against the report
+function liveSimulate(data, n, seed = 1) {
+  const model = liveModel(data), rand = seeded(seed), by = Object.fromEntries(model.map(w => [w.name, { spend: 0, save: 0, calls: 0 }]));
+  const tags = new Set();
+  for (let i = 0; i < n; i++) { const c = liveCall(model, rand); by[c.wf.name].spend += c.cost; by[c.wf.name].save += c.saving; by[c.wf.name].calls++; if (c.tag && c.saving) tags.add(`${c.step} · ${c.tag}`); }
+  return { workflows: by, tags: [...tags] };
+}
+
+const liveSpark = vals => {
+  if (vals.length < 2) return '';
+  const lo = Math.min(...vals), hi = Math.max(...vals), span = hi - lo || 1;
+  const pts = vals.map((v, i) => [i / (vals.length - 1) * 100, 26 - (v - lo) / span * 22]);
+  const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+  const [ex, ey] = pts[pts.length - 1];
+  return `<path class="f" d="${line} L100 28 L0 28 Z"></path><path class="l" d="${line}"></path><circle cx="${ex}" cy="${ey}" r="1.8"></circle>`;
+};
+const clockOf = s => [s / 3600 % 24, s / 60 % 60, s % 60].map(x => String(Math.floor(x)).padStart(2, '0')).join(':');
+
+function renderLive(q, data, { visible = () => true } = {}) {
+  const model = liveModel(data);
+  if (!model.length) { q('liveTerm').innerHTML = '<p class="lv-empty">No live demo: this report records no cost or no calls to simulate.</p>'; return null; }
+  const target = data.overview?.totals?.spend ? (data.overview.totals.replaceable || 0) / data.overview.totals.spend : 0;
+  const scale = Math.max(0.1, Math.ceil(target * 2 * 10) / 10);  // the meter runs 0 to about twice the report's share
+  q('liveMeterMark').style.left = `${Math.min(100, target / scale * 100)}%`;
+  q('liveMeterNote').textContent = `Scale 0–${Math.round(scale * 100)}% · mark: the report’s ${share(target, 1) || '0%'}`;
+  let s, rand, speed = 20, playing = true, timer = null, focus = 'all';
+  const reset = () => {
+    rand = seeded(7);
+    s = { sim: 9 * 3600, spend: 0, save: 0, calls: 0, reps: 0, candles: { all: [] }, by: {} };
+    for (const w of model) { s.by[w.sym] = { spend: 0, save: 0, calls: 0, last: 0, prev: 0, hist: [] }; s.candles[w.sym] = []; }
+    q('liveTape').innerHTML = '';
+  };
+  const candle = (key, minute) => {
+    const c = s.candles[key];
+    if (!c.length || c[c.length - 1].m !== minute) { const prev = c.length ? c[c.length - 1].close : 0;
+      c.push({ m: minute, open: prev, high: prev, low: prev, close: prev, cost: 0, save: 0, reps: 0 }); if (c.length > 36) c.shift(); }
+    return c[c.length - 1];
+  };
+  const tape = [];
+  const emit = () => {
+    const c = liveCall(model, rand), b = s.by[c.wf.sym];
+    b.prev = b.last || c.cost; b.last = c.cost; b.spend += c.cost; b.save += c.saving; b.calls++;
+    s.spend += c.cost; s.save += c.saving; s.calls++; if (c.saving) s.reps++;
+    for (const key of ['all', c.wf.sym]) {
+      const k = candle(key, Math.floor(s.sim / 60));
+      k.cost += c.cost; k.save += c.saving; if (c.saving) k.reps++;
+      k.close = k.cost; k.high = Math.max(k.high, k.close); k.low = Math.min(k.low || k.close, k.close);
+    }
+    tape.unshift(`<li class="${c.saving ? 'is-save' : ''}"><span class="lv-dim">${clockOf(s.sim)}</span><span class="lv-sym">${c.wf.sym}</span>` +
+      `<span class="lv-st">${stepName(c.step)}${c.saving ? ` <span class="lv-save">· ${c.tag}</span>` : ''}</span><span class="${c.saving ? 'lv-save' : ''}">$${c.cost.toFixed(4)}</span></li>`);
+    tape.length = Math.min(tape.length, 40);
+  };
+  // tiles are made once and updated in place, so keyboard focus on one survives every update
+  q('liveHeat').innerHTML = model.map(w => `<button type="button" class="lv-tile" data-sym="${w.sym}">` +
+    `<span class="lv-th"><span class="lv-sym">${w.sym}</span><span class="lv-chg"></span></span><span class="lv-nm">${stepName(w.name)}</span>` +
+    `<span class="lv-big"><span class="lv-pct">0%</span> <span class="lv-dim">saveable</span></span>` +
+    `<svg class="lv-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"></svg><span class="lv-meta"><span class="lv-sp"></span><span class="lv-save lv-sv"></span></span></button>`).join('');
+  const tiles = new Map(model.map(w => [w.sym, q('liveHeat').querySelector(`[data-sym="${w.sym}"]`)]));
+  const chg = b => b.prev ? (b.last - b.prev) / b.prev * 100 : 0;
+  const arrow = v => v > 0 ? `▲${Math.abs(v).toFixed(1)}%` : v < 0 ? `▼${Math.abs(v).toFixed(1)}%` : '·';
+  const paint = () => {
+    q('liveClock').textContent = clockOf(s.sim);
+    const c = s.candles.all, prev = c[c.length - 2], before = c[c.length - 3];
+    q('liveRate').textContent = (prev ? prev.cost : 0).toFixed(3);
+    if (prev && before?.cost) { const v = (prev.cost - before.cost) / before.cost * 100;
+      q('liveRateChg').textContent = (v >= 0 ? '▲ +' : '▼ ') + v.toFixed(1) + '%'; q('liveRateChg').className = 'lv-badge ' + (v >= 0 ? 'up' : 'down'); }
+    const done = c.slice(0, -1).slice(-30); let run = 0;
+    q('liveSparkRate').innerHTML = liveSpark(done.map(x => x.cost));
+    q('liveSparkSpend').innerHTML = liveSpark(done.map(x => (run += x.cost)));
+    q('liveSparkReps').innerHTML = liveSpark(done.map(x => x.reps));
+    q('liveRepRate').textContent = `${prev ? prev.reps : 0} / min`;
+    q('liveSpend').textContent = '$' + s.spend.toFixed(2);
+    q('liveCalls').textContent = plural(s.calls, 'call');
+    q('liveAvg').textContent = '$' + (s.calls ? s.spend / s.calls : 0).toFixed(4) + ' per call';
+    const sh = s.spend ? s.save / s.spend : 0;
+    q('liveSave').textContent = '$' + s.save.toFixed(2);
+    q('liveShare').textContent = `${Math.round(sh * 100)}% of spend`;
+    q('liveMeterFill').style.width = `${Math.min(100, sh / scale * 100)}%`;
+    q('liveMeter').setAttribute('aria-label', `Saveable share of spend: ${Math.round(sh * 100)}%`);
+    q('liveReps').textContent = count(s.reps);
+    for (const w of model) {
+      const b = s.by[w.sym], t = tiles.get(w.sym), p = b.spend ? b.save / b.spend : 0, v = chg(b);
+      if (!t) continue;
+      t.style.background = `rgba(76, 201, 240, ${(0.05 + p * 0.55).toFixed(3)})`;
+      t.classList.toggle('sel', focus === w.sym);
+      t.setAttribute('aria-label', `${plainName(w.name)}: ${Math.round(p * 100)}% saveable`);
+      const e = t.querySelector('.lv-chg'); e.className = 'lv-chg ' + (v > 0 ? 'lv-up' : v < 0 ? 'lv-down' : 'lv-dim'); e.textContent = arrow(v);
+      t.querySelector('.lv-pct').textContent = `${Math.round(p * 100)}%`;
+      t.querySelector('svg').innerHTML = liveSpark((s.candles[w.sym] || []).slice(0, -1).slice(-20).map(x => x.cost));
+      t.querySelector('.lv-sp').textContent = `$${b.spend.toFixed(2)} spent`;
+      t.querySelector('.lv-sv').textContent = `$${b.save.toFixed(2)}`;
+    }
+    q('liveTape').innerHTML = tape.join('');
+    drawChart();
+  };
+  const drawChart = () => {
+    const cv = q('liveChart'), ctx = cv.getContext?.('2d'); if (!ctx) return;
+    const box = cv.getBoundingClientRect?.(); const w = box?.width || 0, h = 230; if (!w) return;
+    const d = globalThis.devicePixelRatio || 1; cv.width = w * d; cv.height = h * d; ctx.setTransform(d, 0, 0, d, 0, 0);
+    const css = getComputedStyle(cv), v = n => css.getPropertyValue(n).trim();
+    const data = s.candles[focus] || [], padR = 58, top = 12, base = h - 22;
+    const max = Math.max(0.001, ...data.map(c => c.high)) * 1.1, y = val => base - (base - top) * val / max;
+    ctx.clearRect(0, 0, w, h); ctx.font = '11px ' + (v('--mono') || 'monospace'); ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) { const val = max * i / 4, yy = y(val); ctx.strokeStyle = v('--lv-line'); ctx.beginPath(); ctx.moveTo(0, yy); ctx.lineTo(w - padR, yy); ctx.stroke();
+      ctx.fillStyle = v('--lv-dim'); ctx.fillText('$' + val.toFixed(3), w - padR + 6, yy + 4); }
+    const slot = (w - padR) / 36, bw = Math.max(3, slot * 0.6);
+    data.forEach((c, i) => { const x = i * slot + slot / 2; ctx.strokeStyle = ctx.fillStyle = c.close >= c.open ? v('--lv-up') : v('--lv-down');
+      ctx.beginPath(); ctx.moveTo(x, y(c.high)); ctx.lineTo(x, y(c.low)); ctx.stroke();
+      const yo = y(c.open), yc = y(c.close); ctx.fillRect(x - bw / 2, Math.min(yo, yc), bw, Math.max(1, Math.abs(yc - yo))); });
+    ctx.strokeStyle = v('--lv-save'); ctx.lineWidth = 2; ctx.beginPath();
+    data.forEach((c, i) => { const x = i * slot + slot / 2; i ? ctx.lineTo(x, y(c.save)) : ctx.moveTo(x, y(c.save)); }); ctx.stroke();
+  };
+  // a tick: simulated seconds pass at the chosen speed; nothing runs while the tab or the page is hidden
+  let last = Date.now();
+  const tick = () => {
+    const now = Date.now(), dt = Math.min(0.25, (now - last) / 1000); last = now;
+    const hidden = typeof document !== 'undefined' && document.hidden;
+    if (playing && visible() && !hidden) {
+      const before = s.sim; s.sim += dt * speed;
+      const n = Math.floor(s.sim / 1.4) - Math.floor(before / 1.4);
+      for (let i = 0; i < n; i++) emit();
+      if (n) paint();
+    }
+    timer = setTimeout(tick, 100);
+  };
+  const warm = () => { for (let i = 0; i < 900; i++) { s.sim += 1.4; emit(); } paint(); };
+  q('livePlay').addEventListener('click', () => { playing = !playing; q('livePlay').textContent = playing ? '❚❚ Pause' : '▶ Play'; });
+  q('liveSpeed').addEventListener('click', () => { speed = speed === 20 ? 120 : speed === 120 ? 5 : 20; q('liveSpeed').textContent = `Speed ${speed}×`; });
+  q('liveReset').addEventListener('click', () => { reset(); warm(); });
+  q('liveHeat').addEventListener('click', e => { const t = e.target.closest('[data-sym]'); if (!t) return;
+    focus = focus === t.dataset.sym ? 'all' : t.dataset.sym;
+    q('liveChartTitle').textContent = focus === 'all' ? 'All workflows · spend per minute' : `${focus} · spend per minute`; paint(); });
+  reset(); warm();
+  return { start() { clearTimeout(timer); last = Date.now(); tick(); }, stop() { clearTimeout(timer); timer = null; }, state: () => s, model };
 }
 
 // The savings overview: what the dataset could save, what to do first, and where. Every figure is a finding the
@@ -1591,6 +1811,8 @@ const OVERVIEW = HEAD + FLOW_TABS + `
   </details>
   </div>
   <div id="view-flow" role="tabpanel" aria-labelledby="tab-flow" data-r="viewFlow" hidden>` + FLOW_VIEW + `
+  </div>
+  <div id="view-live" role="tabpanel" aria-labelledby="tab-live" data-r="viewLive" hidden>` + LIVE_VIEW + `
   </div>` + FOOT;
 
 // a risk in words, never color alone
@@ -1777,7 +1999,8 @@ function renderOverview(root, data, { name = '', meta = [], showEvent = null, de
     q('totals').innerHTML = `${money(o.totals?.spend)} <span class="k">across</span> ${plural(runs, 'run')} <span class="k">in</span> ${plural((o.workflows || []).length, 'workflow')}.`;
     renderOverviewRows(q, o, data.reports);
     const flow = renderFlow(q, data);
-    wireTabs(q, v => { if (v !== 'flow') flow?.stop(); });
+    const live = renderLive(q, data, { visible: () => !q('viewLive').hidden });
+    wireTabs(q, v => { if (v !== 'flow') flow?.stop(); if (v === 'live') live?.start(); else live?.stop(); });
     q('workflows').addEventListener('click', e => {
       const b = e.target.closest('button[data-wf]');
       if (b) show(b.dataset.wf);
@@ -1828,5 +2051,5 @@ function render(root, data, opts = {}) {
   return { show() {}, overview() {} };
 }
 
-window.ProfilerReport = { render, restoreNames };
+window.ProfilerReport = { render, restoreNames, liveSimulate };
 })();
