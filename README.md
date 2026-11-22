@@ -54,7 +54,11 @@ can't, and why), and what to turn on or collect to get more. It writes
 nothing, keeps no key or name list and opens no connection. Its output holds
 only counts, shares and thresholds, so it is safe to send to support; add
 `--names` to list workflow and file names. `--prices IN,OUT` ($ per 1M input
-and output tokens) shows what cost estimated from tokens would allow,
+and output tokens) shows what cost estimated from tokens would allow; price
+models apart with `--prices MODEL=IN,OUT`, once per model (a bare `IN,OUT`
+is then every other model), or with `--prices-file prices.json` holding
+`{"gpt-5": [1.25, 10], "*": [3, 15]}`. A model is named as the trace names
+it, and one no price covers is counted (named with `--names`).
 `--json` prints one object, and `--min-grade B` exits 1 when a workflow
 grades below B. `prepare` prints the same summary when it finishes.
 

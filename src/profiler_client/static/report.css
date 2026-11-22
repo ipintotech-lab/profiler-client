@@ -43,6 +43,7 @@
 .sheet .tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .sheet .grade { border-radius: 6px; display: grid; place-items: center; width: 44px; height: 44px; background: var(--pseudo); color: var(--carbon-deep); }
 .sheet .grade b { font-size: 24px; line-height: 1; font-weight: 800; letter-spacing: -.03em; }
+.sheet .estimated { color: var(--estimate); font-weight: 600; }
 .sheet .grade[data-g="C"] { background: var(--estimate-bg); color: var(--estimate); }
 .sheet .grade[data-g="D"] { background: var(--bad-bg); color: var(--bad); }
 .sheet .totals { font-size: 22px; line-height: 1.35; font-weight: 600; letter-spacing: -.01em; margin-top: 18px; max-width: 46ch; }
