@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.4"]
+dev = ["pytest>=7.4", "ruff==0.17.6"]  # ruff pinned: the same lint here and in CI
 
 [project.scripts]
 profiler-client = "profiler_client.cli:main"

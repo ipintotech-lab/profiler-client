@@ -136,6 +136,8 @@ def check_data_quality(events: list, estimated: dict | None = None) -> dict:
         if key == "cost" and estimated:
             entry["status"] = "estimated"
             entry["effect"] = _estimate_effect(estimated)
+            if estimated.get("unpriced"):  # calls with tokens and no price for their model: no cost
+                entry["unpriced"] = estimated["unpriced"]
             gaps.append(entry)
         elif status != "ok":
             entry["effect"] = effect

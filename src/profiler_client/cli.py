@@ -28,7 +28,7 @@ from .keyfile import key_from_command, key_from_env
 from .names import Names
 from .pseudonym import TOKEN, Pseudonymizer, load_or_create_key, new_key
 from .readiness import is_llm, readiness, remediation, workflows
-from .report import forget_name_lists, read_name_lists, render_html, translate, write_name_list
+from .report import forget_name_lists, name_map, read_name_lists, render_html, translate, write_name_list
 from .trace_refs import original_record, read_refs, refs_dir, write_refs
 
 # a decoded report is local and never huge; bound it so a malformed or hostile
@@ -295,6 +295,33 @@ def _show_event(args: argparse.Namespace) -> int:
     raise ValueError("that event isn't in the event references of this report's dataset(s)")
 
 
+def _names(args: argparse.Namespace) -> int:
+    """Export a report's name map, to load into the Openly7 page in a browser so it shows your names
+    the way ``open`` does. The file holds names; it stays on this machine and is never uploaded."""
+    source = Path(args.report)
+    hashes = _dataset_hashes(_read_report(source))
+    if not hashes:
+        raise ValueError("this report has no dataset hash (payload_sha256), so it has no name list")
+    mapping = name_map(hashes)
+    if not mapping["datasets"]:
+        raise ValueError("no name list on this machine for this report's dataset; "
+                         "export the name map on the machine that prepared it")
+    output = Path(args.output) if args.output else source.with_name(source.stem + ".names.json")
+    # it holds your real names: owner-only (0600), as the name lists themselves are
+    fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    if hasattr(os, "fchmod"):
+        os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(mapping, f, ensure_ascii=False)
+    for digest in hashes:
+        if digest not in mapping["datasets"]:
+            print(f"no name list on this machine for dataset {digest[:12]}…, so its names are not in the map")
+    print(f"wrote {len(mapping['names'])} name(s) to {output}")
+    print("Keep it on this machine. Load it in the Openly7 report page to see your names there; "
+          "it is read by your browser and never uploaded.")
+    return 0
+
+
 def _forget_one(payload_sha256: str | None = None, everything: bool = False) -> str:
     names = forget_name_lists(payload_sha256=payload_sha256, everything=everything)
     refs = forget_name_lists(refs_dir(), payload_sha256=payload_sha256, everything=everything)
@@ -415,6 +442,12 @@ def main(argv: list[str] | None = None) -> int:
     se.add_argument("report", help="downloaded report JSON")
     se.add_argument("event_id", help="the event id from the report (h:...)")
     se.set_defaults(run=_show_event)
+
+    nm = sub.add_parser("names", help="export a report's name map, to see your names on the Openly7 page; "
+                                      "it stays on this machine and is never uploaded")
+    nm.add_argument("report", help="downloaded report JSON")
+    nm.add_argument("-o", "--output", help="name map file to write (default: beside the report, .names.json)")
+    nm.set_defaults(run=_names)
 
     fg = sub.add_parser("forget", help="delete the local pseudonym-to-name list(s) and event references")
     fg.add_argument("target", nargs="?", help="a report JSON, or a dataset hash (payload_sha256)")

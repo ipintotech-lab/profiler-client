@@ -184,6 +184,10 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 def main() -> int:
     print(f"platform: {sys.platform}, stdout encoding: {sys.stdout.encoding}, "
           f"filesystem encoding: {sys.getfilesystemencoding()}", flush=True)
+    # this script's own log keeps the console's code page (what it reports above), but a path it can't
+    # encode there, like "data ü" on a Hebrew or Russian Windows (cp1255, cp1251), prints escaped, not a crash
+    sys.stdout.reconfigure(errors="backslashreplace")
+    sys.stderr.reconfigure(errors="backslashreplace")
     root = Path(tempfile.mkdtemp(prefix="profiler-client-smoke-"))
     env = {k: v for k, v in os.environ.items() if k not in ("PYTHONIOENCODING", "PYTHONUTF8")}
     env["XDG_DATA_HOME"] = str(root / "data ü")

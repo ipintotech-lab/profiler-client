@@ -305,3 +305,50 @@
 .sheet details.capacity { margin-top:16px }
 .sheet details.capacity > summary { cursor:pointer; color:var(--carbon); text-decoration:underline; text-underline-offset:3px; min-height:44px; display:flex; align-items:center }
 .sheet details.capacity .tbl { margin:8px 0 }
+
+/* Openly7 brand: shown when the host asks (profiler-client open and app); the Openly7 site has its own */
+.sheet .brandbar { display: flex; align-items: center; gap: 10px; margin: -6px 0 18px; padding-bottom: 12px; border-bottom: 1px solid var(--rule); flex-wrap: wrap; }
+.sheet .brandbar .o7 { font-weight: 800; font-size: 21px; letter-spacing: -.02em; }
+.sheet .brandbar .o7 b { color: var(--carbon); }
+.sheet .brandbar .prod { font-size: 14px; color: var(--ink-2); border-left: 1px solid var(--rule); padding-left: 10px; }
+.sheet .brandbar .beta { font-size: 11px; font-weight: 700; color: var(--carbon); background: var(--pseudo); border-radius: 99px; padding: 1px 8px; }
+.sheet .brandfoot { margin-top: 28px; padding-top: 12px; border-top: 1px solid var(--rule); font-size: 13px; color: var(--ink-2); }
+
+/* the savings overview: money first, then what to do, then where */
+.sheet .sv-hero { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 16px; margin-top: 18px; }
+@media (max-width: 760px) { .sheet .sv-hero { grid-template-columns: 1fr; } }
+.sheet .sv-card { border: 1px solid var(--rule); border-radius: 10px; padding: 18px; }
+.sheet .sv-big { font-size: 40px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.sheet .sv-big small { font-size: 17px; font-weight: 600; color: var(--ink-2); letter-spacing: 0; }
+.sheet .sv-lead { font-size: 17px; margin: 6px 0 16px; max-width: 60ch; }
+.sheet .sv-stack { display: flex; height: 20px; border-radius: 6px; overflow: hidden; background: var(--rule); }
+.sheet .sv-stack i { display: block; height: 100%; }
+.sheet .sv-stack .ready, .sheet .sv-legend .ready { background: var(--shared); }
+.sheet .sv-stack .review, .sheet .sv-legend .review { background: var(--estimate); }
+.sheet .sv-stack .saved, .sheet .sv-legend .saved { background: var(--carbon); }
+.sheet .sv-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; font-size: 14px; }
+.sheet .sv-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; }
+.sheet .sv-legend .needed { background: var(--rule); }
+.sheet .sv-proj label { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2); margin-bottom: 6px; }
+.sheet .sv-proj input { width: 100%; font: 600 17px var(--mono); padding: 8px 10px; border: 1px solid var(--rule); border-radius: 8px; background: var(--paper); color: var(--ink); }
+.sheet .sv-out { font-size: 26px; font-weight: 800; margin-top: 12px; font-variant-numeric: tabular-nums; }
+.sheet .sv-actions { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 10px; }
+.sheet .sv-act { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 14px; border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; }
+.sheet .sv-act .rank { width: 28px; height: 28px; border-radius: 50%; background: var(--pseudo); color: var(--carbon); display: grid; place-items: center; font-weight: 800; font-size: 14px; }
+.sheet .sv-act h4 { margin: 0; font-size: 16px; }
+.sheet .sv-act .where { font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
+.sheet .sv-act .why { font-size: 14px; margin-top: 6px; }
+.sheet .sv-act .money { text-align: right; font-variant-numeric: tabular-nums; }
+.sheet .sv-act .money b { font-size: 19px; }
+.sheet .sv-act .money span { display: block; font-size: 12.5px; color: var(--ink-2); }
+.sheet .sv-act details { grid-column: 2 / -1; font-size: 14px; }
+.sheet .sv-act summary { cursor: pointer; color: var(--carbon); font-weight: 600; }
+.sheet .sv-act ol { margin: 6px 0 0; padding-left: 20px; }
+@media (max-width: 560px) { .sheet .sv-act { grid-template-columns: auto minmax(0, 1fr); } .sheet .sv-act .money { grid-column: 2; text-align: left; } }
+.sheet .pill { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 9px; border-radius: 99px; white-space: nowrap; }
+.sheet .pill.ready { background: #e1f3e9; color: var(--shared); }
+.sheet .pill.review { background: var(--estimate-bg); color: var(--estimate); }
+.sheet .pill.invest { background: var(--bad-bg); color: var(--bad); }
+.sheet .sv-also { margin-top: 10px; border: 1px dashed var(--rule); border-radius: 10px; padding: 12px 16px; font-size: 14px; }
+.sheet .sv-more { margin-top: 22px; }
+.sheet .sv-more summary { cursor: pointer; font-weight: 700; }

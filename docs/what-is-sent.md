@@ -58,6 +58,7 @@ It never sends:
 | name list | `~/.local/share/profiler-client/names/` | pseudonym → original name, so reports show your names |
 | event references | `~/.local/share/profiler-client/refs/` | which trace file, record and place each event came from, for `show-event` |
 | `manifest.json` | the dataset directory | a summary of the dataset (counts, versions, options used) |
+| name map | where `names` writes it (by default beside the report JSON) | pseudonym → name for that report's datasets, loaded into your browser by the Openly7 page; never uploaded |
 | report page | where `open` writes it (by default beside the report JSON) | the report with your names restored |
 | key file | where you put it, if you use `--key-file` | the secret key, protected as [below](#how-the-key-is-protected) |
 

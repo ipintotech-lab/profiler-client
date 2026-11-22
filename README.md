@@ -33,6 +33,7 @@ profiler-client prepare spans.json --keep-names -o analysis-ready
 profiler-client inspect analysis-ready
 profiler-client validate analysis-ready
 profiler-client open report.json
+profiler-client names report.json    # a name map, to see your names on the Openly7 page; never uploaded
 profiler-client forget report.json   # delete the local name list for that dataset
 profiler-client version   # or profiler-client --version
 ```
@@ -86,6 +87,11 @@ access of the folder it is written to); no report data is sent anywhere. It
 restores only from the list for that exact dataset, says how many pseudonyms it
 couldn't match, and — since the HTML holds your real values — keep it local
 rather than re-uploading or sharing it.
+
+`names` exports the same names as a name map (`report.names.json`, owner-only on
+Mac and Linux) for that report's datasets only. Load it in the Openly7 report page
+and your browser swaps the names in, so the page looks the same as `open`'s copy.
+The map is read by your browser and never uploaded.
 
 `prepare` reads only the files you name: directories and symlinks are
 refused, and it prints the list before reading. It writes `events.jsonl` and

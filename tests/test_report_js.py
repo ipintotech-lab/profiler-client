@@ -439,4 +439,17 @@ def test_the_overview_is_marked_when_any_workflows_cost_is_estimated():
     overview = {"overview": {"workflows": [{"name": "wf", "runs": 3, "spend": 10.0, "replaceable": 3.5, "findings": 2}],
                              "totals": {"spend": 10.0, "replaceable": 3.5, "findings": 2}},
                 "reports": {"wf": {**_report(), "data_quality": _ESTIMATED}}}
-    assert "Cost estimated from tokens" in _render(overview)["sub"]
+    assert "Cost estimated from tokens" in _render(overview)["svEstimate"]  # under the savings figure
+    overview["reports"]["wf"]["data_quality"] = {"gaps": []}
+    assert not _render(overview).get("svEstimate")
+
+
+def test_the_overview_names_the_calls_no_price_covers():
+    def overview(*unpriced):
+        reports = {f"wf{i}": {**_report(), "data_quality": {"gaps": [{**_ESTIMATED["gaps"][0], **({"unpriced": n} if n else {})}]}}
+                   for i, n in enumerate(unpriced)}
+        return {"overview": {"workflows": [{"name": w, "runs": 3, "spend": 10.0, "replaceable": 3.5, "findings": 2} for w in reports],
+                             "totals": {"spend": 20.0, "replaceable": 7.0, "findings": 4}}, "reports": reports}
+    assert "no price" not in _render(overview(0))["svEstimate"]  # only when there are unpriced calls
+    assert "1,003 calls have no price, so the spend leaves them out." in _render(overview(1000, 3))["svEstimate"]
+    assert "1 call has no price, so the spend leaves it out." in _render(overview(1, 0))["svEstimate"]
