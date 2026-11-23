@@ -281,9 +281,12 @@ def test_ctrl_c_deletes_the_files_it_copied(tmp_path):
     # Ctrl+C is SIGINT, which Python's own handler raises as KeyboardInterrupt: not the SIGTERM
     # handler the test above goes through
     env = {**os.environ, "TMPDIR": str(tmp_path), "XDG_DATA_HOME": str(tmp_path / "data")}
-    proc = subprocess.Popen([sys.executable, "-m", "profiler_client.cli", "app", "--no-browser"],
-                            stdout=subprocess.PIPE, text=True, env=env, encoding="utf-8",
-                            preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
+    # a process started in the background ignores SIGINT, and its child inherits that; put Python's
+    # own Ctrl+C handler back in the child before the app starts, as a terminal would have it
+    start = ("import runpy, signal, sys; signal.signal(signal.SIGINT, signal.default_int_handler); "
+             "sys.argv = ['profiler-client', 'app', '--no-browser']; "
+             "runpy.run_module('profiler_client.cli', run_name='__main__', alter_sys=True)")
+    proc = subprocess.Popen([sys.executable, "-c", start], stdout=subprocess.PIPE, text=True, env=env, encoding="utf-8")
     try:
         assert re.search(r"http://127\.0\.0\.1:\d+/\?t=", proc.stdout.readline() + proc.stdout.readline()
                          + proc.stdout.readline())
