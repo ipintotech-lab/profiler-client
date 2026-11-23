@@ -386,6 +386,12 @@
 }
 .sheet .fl-card { border: 1px solid var(--rule); border-radius: 10px; padding: 12px; min-width: 0; }
 .sheet .fl-scroll { overflow-x: auto; }
+/* the diagram never shrinks below 720px, where its labels stop being readable: a narrower box (a phone) scrolls it
+   sideways, and says so, or it looks cut off */
+.sheet .fl-card:has(> .fl-scroll) { container: flcard / inline-size; }
+.sheet .fl-hint { display: none; margin: 0 0 8px; font-size: 13px; color: var(--ink-2); }
+@container flcard (max-width: 719.98px) { .sheet .fl-hint { display: block; } }
+@media print { .sheet .fl-hint { display: none !important; } }
 .sheet .fl-svg { width: 100%; min-width: 720px; height: auto; display: block; }
 .sheet .fl-svg .t1 { fill: var(--ink); font: 700 12px var(--sans); }
 .sheet .fl-svg .t2 { fill: var(--ink-2); font: 500 11px var(--mono); }

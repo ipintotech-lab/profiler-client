@@ -1279,7 +1279,8 @@ const FLOW_VIEW = `
     <p class="fl-run" data-r="flowRun" hidden></p>
     <div class="fl-grid">
       <div class="fl-card">
-        <div class="fl-scroll"><svg class="fl-svg" data-r="flowSvg" role="img" aria-labelledby="fl-title" viewBox="0 0 920 440">
+        <p class="fl-hint" aria-hidden="true">Scroll sideways to see the whole flow →</p>
+        <div class="fl-scroll" tabindex="0" aria-label="Agent flow diagram, scrolls sideways"><svg class="fl-svg" data-r="flowSvg" role="img" aria-labelledby="fl-title" viewBox="0 0 920 440">
           <title id="fl-title">Agent flow: the router’s decisions, the agents they hand work to, and Openly7’s numbered remarks</title>
           <g data-r="flowBase"></g><g data-r="flowTrafficLayer"></g><g data-r="flowToken"></g><g data-r="flowPins"></g>
         </svg></div>
