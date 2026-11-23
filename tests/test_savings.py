@@ -385,3 +385,52 @@ def test_investigate_lists_steps_whose_own_results_change_before_unsafe_repeats(
     high = _text(_render(data)["slots"]["risks"]).split("Investigate first")[1]
     assert "lookup_rates" not in high.split("analyze_remediation")[0]
     assert "classify_ticket" in high.split("analyze_remediation")[0]
+
+
+# --- a trace with metadata only: "same input" can't be checked ------------------------------------
+
+def _stripped_gaps(recorded: int = 0) -> list[dict]:
+    # what the client's own quality check says of tool calls whose inputs weren't recorded (all but `recorded` of 4)
+    from profiler_client.contract import Tool, TraceEvent
+    from profiler_client.readiness import check_data_quality
+    events = [TraceEvent(trace_id=f"t{i}", run_id=f"r{i}", workflow="wf", event_type="tool_call", node="get_rate",
+                         tool=Tool(name="get_rate"), latency_ms=12.0, input_state={"rate": "h:" + "0" * 64} if i < recorded else {})
+              for i in range(4)]
+    gaps = check_data_quality(events)["gaps"]
+    status = "partial" if recorded else "missing"
+    assert {"key": "tool_input", "status": status}.items() <= next(g for g in gaps if g["key"] == "tool_input").items()
+    return gaps
+
+
+def _loan_with(stripped: set[str], extra: str | None = None, recorded: int = 0) -> dict:
+    from test_agent_flow import FLOW
+    with gzip.open(FLOW, "rt", encoding="utf-8") as f:
+        raw = json.load(f)
+    if extra:  # a second workflow, the same day again under another name
+        raw["reports"][extra] = copy.deepcopy(raw["reports"]["loan-application"])
+        raw["overview"]["workflows"].append({**raw["overview"]["workflows"][0], "name": extra})
+    for wf in stripped:
+        raw["reports"][wf].setdefault("data_quality", {})["gaps"] = _stripped_gaps(recorded)
+    return view(raw)
+
+
+def test_an_empty_investigate_tile_says_it_cant_be_checked_when_inputs_werent_recorded():
+    tiles = _text(_render(_loan_with({"loan-application"}))["slots"]["risks"])
+    assert "Can’t be checked: the inputs to these steps weren’t recorded." in tiles
+    assert "Nothing to investigate" not in tiles
+    # the workflow's own page says the same
+    one = _text(_render(_loan_with({"loan-application"})["reports"]["loan-application"])["slots"]["risks"])
+    assert "Can’t be checked: the inputs to these steps weren’t recorded." in one and "Nothing to investigate" not in one
+
+
+def test_with_some_workflows_unrecorded_the_tile_says_where_it_couldnt_check():
+    tiles = _text(_render(_loan_with({"second-day"}, extra="second-day"))["slots"]["risks"])
+    assert "Nothing to investigate where inputs were recorded. In 1 of 2 workflows they weren’t, so it can’t be checked there." in tiles
+    # recorded everywhere: the plain sentence
+    assert "Nothing to investigate: no step gave different results" in _text(_render(_loan_with(set(), extra="second-day"))["slots"]["risks"])
+
+
+def test_inputs_recorded_on_some_calls_are_checked_on_those():
+    # part of the inputs recorded: the check ran where they were, so the tile keeps its plain sentence
+    tiles = _text(_render(_loan_with({"loan-application"}, recorded=2))["slots"]["risks"])
+    assert "Nothing to investigate: no step gave different results" in tiles and "Can’t be checked" not in tiles

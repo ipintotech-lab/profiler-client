@@ -645,11 +645,18 @@ const RISK_TILES = [
 const inHeadline = t => t.counted == null || t.counted === t.count ? '' : `, ${t.counted ? count(t.counted) : 'none'} in the headline`;
 // an empty tile says what its emptiness means, not just "0 findings". The server marks a finding high risk only
 // when a step's result changes for the same input, so no high-risk finding means no step did
+// -- unless the inputs weren't recorded (a trace with metadata only): then "same input" can't be checked at all
 const EMPTY_TILE = {
   low: () => 'None yet: every finding needs a check first. More runs, or steps declared read-only, can make one low risk.',
   medium: () => 'None.',
-  high: runs => `Nothing to investigate: no step gave different results for the same input${runs ? ` in ${plural(runs, 'run')}` : ''}.`,
+  high: (runs, { unrecorded = 0, workflows = 1 } = {}) => unrecorded >= workflows
+    ? 'Can’t be checked: the inputs to these steps weren’t recorded.'
+    : unrecorded
+      ? `Nothing to investigate where inputs were recorded. In ${count(unrecorded)} of ${plural(workflows, 'workflow')} they weren’t, so it can’t be checked there.`
+      : `Nothing to investigate: no step gave different results for the same input${runs ? ` in ${plural(runs, 'run')}` : ''}.`,
 };
+// a workflow whose tool calls carry no real inputs: whether the same input gives different results can't be checked
+const inputsUnrecorded = rep => gapsOf(rep || {}).some(g => g.key === 'tool_input' && g.status === 'missing');
 const INVESTIGATE_SHOWN = 5;
 // the steps behind the high-risk findings, one line each, so an engineer knows where to look
 function investigateList(found, many) {
@@ -670,8 +677,9 @@ function investigateList(found, many) {
   return `<ul class="inv">${all.slice(0, INVESTIGATE_SHOWN).map(line).join('')}</ul>` +
     (more > 0 ? `<p class="k">And ${plural(more, 'more step')}, in each workflow’s All findings.</p>` : '');
 }
-// found: [{ wf, f }] for every finding these totals count, to name the high-risk ones; runs: for the empty tiles
-function renderRisks(q, totals, labels = {}, { found = [], runs = 0 } = {}) {
+// found: [{ wf, f }] for every finding these totals count, to name the high-risk ones; runs: for the empty tiles;
+// recorded: { unrecorded, workflows }, how many of the workflows lack their inputs
+function renderRisks(q, totals, labels = {}, { found = [], runs = 0, recorded } = {}) {
   q('risks').hidden = !totals;
   if (!totals) return;
   const high = found.filter(x => x.f.risk === 'high'), many = new Set(found.map(x => x.wf)).size > 1;
@@ -679,7 +687,7 @@ function renderRisks(q, totals, labels = {}, { found = [], runs = 0 } = {}) {
     const t = totals[risk] || { count: 0, saving: 0 };
     const head = `<li class="tile" data-risk="${risk}"><h3>${esc(name || labels[risk] || risk)}</h3>` +
       (name && labels[risk] ? `<p class="k">${esc(labels[risk])}</p>` : '');
-    if (!t.count) return `${head}<p class="empty">${esc(EMPTY_TILE[risk](runs))}</p></li>`;
+    if (!t.count) return `${head}<p class="empty">${esc(EMPTY_TILE[risk](runs, recorded))}</p></li>`;
     const figure = risk === 'high' ? '' : `<p class="fig">${t.saving ? `${money(t.saving)} <span class="k">in this dataset</span>` : 'No saving counted'}</p>`;
     const list = risk === 'high' && high.length ? investigateList(high, many) : '';
     return `${head}${figure}<p>${plural(t.count, 'finding')}${inHeadline(t)}</p>${list}<p class="k">${esc(act)}</p></li>`;
@@ -1229,7 +1237,8 @@ function renderReport(root, data, { name = '', meta = [], showEvent = null, decl
   renderLead(q, data);
   markEstimate(q, costEstimated(data));
   renderRisks(q, data.summary?.risk_totals, data.summary?.risk_labels,
-    { found: (data.summary?.findings || []).map(f => ({ wf: '', f })), runs: data.summary?.totals?.runs });
+    { found: (data.summary?.findings || []).map(f => ({ wf: '', f })), runs: data.summary?.totals?.runs,
+      recorded: { unrecorded: inputsUnrecorded(data) ? 1 : 0, workflows: 1 } });
   renderBetween(q, data);
   q('map').addEventListener('click', e => {
     const b = e.target.closest('button[data-map]');
@@ -2106,7 +2115,8 @@ function renderOverview(root, data, { name = '', meta = [], showEvent = null, de
     }
     const runs = (o.workflows || []).reduce((n, r) => n + (r.runs || 0), 0);
     const found = Object.entries(data.reports || {}).flatMap(([wf, r]) => (r?.summary?.findings || []).map(f => ({ wf, f })));
-    renderRisks(q, o.risk_totals, o.risk_labels, { found, runs });
+    renderRisks(q, o.risk_totals, o.risk_labels,
+      { found, runs, recorded: { unrecorded: reports.filter(inputsUnrecorded).length, workflows: reports.length } });
     q('totals').innerHTML = `${money(o.totals?.spend)} <span class="k">across</span> ${plural(runs, 'run')} <span class="k">in</span> ${plural((o.workflows || []).length, 'workflow')}.`;
     renderOverviewRows(q, o, data.reports);
     const flow = renderFlow(q, data);
