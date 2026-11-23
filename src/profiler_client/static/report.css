@@ -130,6 +130,8 @@
 .sheet .risks .fig .k { font-size: 13px; font-weight: 400; }
 .sheet .risks .k { color: var(--ink-2); font-size: 13px; }
 .sheet .risks + .notes { margin-top: 12px; }
+.sheet .risks .empty { color: var(--ink-2); }
+.sheet .risks .inv { margin: 2px 0; padding-left: 18px; font-size: 14px; display: flex; flex-direction: column; gap: 4px; }
 .sheet .lead + .notes { margin-top: 8px; }
 .sheet .lead:not([hidden]) ~ .totals { font-size: 16px; font-weight: 400; margin-top: 12px; }
 
