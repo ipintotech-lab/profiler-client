@@ -232,35 +232,54 @@ def _workflow_view(report: dict) -> dict:
     }
 
 
-def render_html(report: dict, title: str, restored: int | None = None, unmatched: int | None = None,
-                source: str | None = None) -> str:
-    # be honest in the header about how much was restored: with nothing matched,
-    # don't claim "your own names" -- the page is still pseudonymized
-    if restored:
-        meta = ["Opened on your machine"]  # the header's chip says the names are restored
-        if unmatched:
-            meta.append(f"{unmatched:,} pseudonym{'' if unmatched == 1 else 's'} not matched")
-    elif unmatched:
-        meta = ["Opened on your machine", "no names restored, pseudonyms shown"]
-    else:
-        meta = ["Opened on your machine"]
+def _names_shown(value: Any, key: str = "") -> set[str]:
+    """The pseudonyms the page shows as names: workflow, agent, step, tool and model names left unrestored.
+    Event ids (never restored, only for show-event) and the pseudonymized output values inside a finding's
+    action are not names, so they don't count."""
+    if key in ("event_id", "action"):
+        return set()
+    if isinstance(value, str):
+        return set(TOKEN.findall(value))
+    if isinstance(value, list):
+        return set().union(*(_names_shown(v, key) for v in value))
+    if isinstance(value, dict):
+        return set().union(*(_names_shown(k) | _names_shown(v, k) for k, v in value.items()))
+    return set()
+
+
+def render_html(report: dict, title: str, restored: int | None = None, source: str | None = None) -> str:
+    # say in the header what is on screen: your names, names as they were sent, or pseudonyms. Don't claim
+    # "your own names" with nothing restored, and don't claim pseudonyms are shown when the names were sent as
+    # they are (prepare --keep-names): count only the names the page draws, not ids or output values
+    page = view(report)
+    shown = len(_names_shown(page))
+    meta = ["Opened on your machine"]  # with names restored, the header's chip says so
+    if restored and shown:
+        meta.append(f"{shown:,} name{'' if shown == 1 else 's'} not matched, shown as pseudonyms")
+    elif not restored:
+        meta.append("no names restored, pseudonyms shown" if shown else "names shown as they were sent")
     css = (STATIC / "report.css").read_text(encoding="utf-8")
     js = (STATIC / "report.js").read_text(encoding="utf-8")
+    theme = (STATIC / "theme.js").read_text(encoding="utf-8")
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(TOKEN.sub(lambda m: m.group(0)[:9], title))}</title>
 <style>
-  body {{ margin: 0; background: #f4f5f8; }}
+  body {{ margin: 0; background: var(--o7-paper); }}
   main {{ max-width: 1180px; margin: 0 auto; padding: 32px 16px 48px; }}
-  .btn {{ background: transparent; color: #3a3e9e; border: 0; box-shadow: inset 0 0 0 1.5px #3a3e9e; border-radius: 6px;
+  .btn {{ background: transparent; color: var(--o7-accent); border: 0; box-shadow: inset 0 0 0 1.5px var(--o7-accent); border-radius: 6px;
          padding: 6px 12px; font: 600 14px/1.2 "Helvetica Neue", Arial, sans-serif; cursor: pointer; }}
+  .btn:hover {{ background: var(--o7-accent-soft); }}
   @media print {{ body {{ background: #fff; }} main {{ padding: 0; max-width: none; }} }}
 {css}
 </style></head>
 <body><main>
 <article class="sheet" id="report"><noscript>This report is drawn by a script in this file. Allow scripts for this local page to see it.</noscript></article>
 </main>
-<script type="application/json" id="report-data">{_script_json({"report": view(report), "name": title, "meta": meta, "source": source, "restored": bool(restored)})}</script>
+<script type="application/json" id="report-data">{_script_json({"report": page, "name": title, "meta": meta, "source": source, "restored": bool(restored)})}</script>
+<script>
+{theme}
+</script>
 <script>
 {js}
 </script>
@@ -268,13 +287,14 @@ def render_html(report: dict, title: str, restored: int | None = None, unmatched
 (function () {{
   const page = JSON.parse(document.getElementById('report-data').textContent);
   const root = document.getElementById('report');
+  OpenlyTheme.init();  // the saved choice, else the system's; print is always light
   ProfilerReport.render(root, page.report, {{ name: page.name, meta: page.meta, showEvent: page.source, restored: page.restored, brand: true }});
   const print = document.createElement('button');
   print.className = 'btn';
   print.type = 'button';
   print.textContent = 'Print or save as PDF';
   print.addEventListener('click', () => window.print());
-  root.querySelector('.tools').append(print);
+  root.querySelector('.tools').append(print, OpenlyTheme.toggle());
 }})();
 </script>
 </body></html>

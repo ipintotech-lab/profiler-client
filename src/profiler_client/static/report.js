@@ -7,6 +7,9 @@
  * A dataset overview (`data.overview` with `data.reports`, one report per workflow) draws a list of the
  * workflows first; a row opens that workflow's report from `data.reports` and a back button returns.
  * The host's buttons in `.tools`, and anything it appended to `root`, move along. render returns { show(workflow), overview() } to switch by code.
+ *
+ * Themes: report.css holds one set of variables per theme, picked by data-theme on <html>; static/theme.js sets it
+ * and makes the toggle. This file stores nothing.
  */
 (function () {
 'use strict';
@@ -1282,11 +1285,11 @@ const FLOW_VIEW = `
         </svg></div>
         <p class="sv-legend fl-legend"><span><i class="fl-k hand"></i>hands work to (width = share of runs)</span><span><i class="fl-k reads"></i>a decision reads its result</span><span><i class="fl-k loop"></i>back to an earlier agent</span><span><i class="fl-k tint"></i>agent tint = its share of spend</span></p>
       </div>
-      <div class="fl-card">
+      <div class="fl-card fl-side"><div class="fl-sidein">
         <h3>Openly7 remarks</h3>
         <ol class="fl-remarks" data-r="flowRemarks"></ol>
         <p class="why">The diagram holds structure, counts and costs only: no prompts, inputs or outputs. With share-safe on, it shows neutral labels (Agent A, Decision 1, Step 1) instead of names, so you can send it outside your company.</p>
-      </div>
+      </div></div>
     </div>
   </div>`;
 
@@ -1317,7 +1320,25 @@ function flowModel(rep) {
   const total = rep.summary?.totals?.cost || 0, saved = rep.summary?.replaceable?.cost || 0;
   return { ag, layout, box, runs, agents, decisions, router: ag.router && agents.get(ag.router), total, saved, unattributed,
            links: ag.links || [], frames: layout.frames || [], findings: rep.summary?.findings || [],
-           opps: rep.summary?.opportunities || [] };
+           opps: rep.summary?.opportunities || [], ports: flowPorts(ag.links || [], box) };
+}
+
+// where each handoff leaves its decision and reaches its agent: a box's handoffs are spread along its edge in the
+// order of their other ends, so no two arrows share an end and each share label sits beside its own arrow
+function flowPorts(links, box) {
+  const hand = links.filter(l => l.kind === 'handoff' && box.has(l.decision) && box.has(l.to_agent));
+  const mid = id => box.get(id).x + box.get(id).w / 2, ports = new Map(hand.map(l => [l, {}]));
+  const spread = (key, other, end) => {
+    const groups = new Map();
+    for (const l of hand) groups.set(l[key], [...(groups.get(l[key]) || []), l]);
+    for (const [id, ls] of groups) {
+      const b = box.get(id);
+      ls.sort((p, q) => mid(p[other]) - mid(q[other]));
+      ls.forEach((l, i) => { ports.get(l)[end] = ls.length === 1 ? mid(id) : b.x + b.w * (i + 1) / (ls.length + 1); });
+    }
+  };
+  spread('decision', 'to_agent', 'x1'); spread('to_agent', 'decision', 'x2');
+  return ports;
 }
 
 // the remarks: priced ones (the counted findings, by where they sit) first, then the rest
@@ -1364,7 +1385,7 @@ function flowRemarks(m) {
 }
 
 // a curve from the bottom of one box to the top of another, and a loop for a hand back
-const flowCurve = (a, b) => { const x1 = a.x + a.w / 2, y1 = a.y + a.h, x2 = b.x + b.w / 2, y2 = b.y;
+const flowCurve = (a, b, p = {}) => { const x1 = p.x1 ?? a.x + a.w / 2, y1 = a.y + a.h, x2 = p.x2 ?? b.x + b.w / 2, y2 = b.y;
   return `M${x1} ${y1} C ${x1} ${y1 + 45}, ${x2} ${y2 - 45}, ${x2} ${y2 - 2}`; };
 const flowLoop = (a, b) => `M${a.x + 8} ${a.y + 10} C ${a.x - 26} ${a.y - 20}, ${b.x - 26} ${b.y + b.h + 20}, ${b.x + 8} ${b.y + b.h - 4}`;
 
@@ -1390,8 +1411,31 @@ function flowTypicalRun(m) {
   return steps;
 }
 
+// a box's name, never cut: on one line, or on two split at a separator nearest the middle; a line still too long is
+// drawn narrower to fit (textLength). The full name is also the box's tooltip.
+// characters a line holds (12px bold, about 6.6px a character), less the room of a remark pin in the box's corner
+const flowFit = (b, pinned) => Math.max(6, Math.floor((b.w - (pinned ? 36 : 20)) / 6.6));
+function flowSplit(t, n) {
+  if (t.length <= n) return [t];
+  let best = -1;
+  for (let i = 1; i < t.length - 1; i++) {
+    if (!/[_\-\s.\/]/.test(t[i - 1]) || /\s/.test(t[i])) continue;  // break after a separator
+    if (best < 0 || Math.abs(i - t.length / 2) < Math.abs(best - t.length / 2)) best = i;
+  }
+  const at = best > 0 ? best : Math.min(n, Math.ceil(t.length / 2));
+  return [t.slice(0, at).trimEnd(), t.slice(at).trimStart()];
+}
+const flowLines = (t, b, pinned) => flowSplit(t, flowFit(b, pinned)).length;
+function flowName(t, b, pad, pinned) {
+  const n = flowFit(b, pinned), lines = flowSplit(t, n), y = lines.length > 1 ? [17, 31] : [22];
+  return `<title>${esc(t)}</title>` + lines.map((l, i) => `<text class="t1" x="${b.x + pad}" y="${b.y + y[i]}"` +
+    (l.length > n ? ` textLength="${b.w - pad - (pinned ? 26 : 10)}" lengthAdjust="spacingAndGlyphs"` : '') + `>${esc(l)}</text>`).join('');
+}
+
 function flowBase(m, s) {
-  const lab = id => esc(s.label(id)), fit = (t, n) => t.length > n ? t.slice(0, n - 1) + '…' : t;
+  const lab = id => esc(s.label(id));
+  // a box with a remark's pin in its top right corner: its name keeps clear of the pin
+  const pinned = b => s.remarks.some(r => r.at[0] >= b.x + b.w - 30 && r.at[0] <= b.x + b.w + 6 && r.at[1] >= b.y - 6 && r.at[1] <= b.y + 20);
   const on = new Set(s.active >= 0 ? s.remarks[s.active].on : []), cls = (base, id) => base + (on.has(id) ? ' hl' : '') + (s.live.has(id) ? ' is-live' : '');
   const parts = ['<defs><marker id="fl-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="fl-arrow"></path></marker></defs>'];
   for (const f of m.frames) parts.push(`<rect class="fl-frame" x="${f.x}" y="${f.y}" width="${f.w}" height="${f.h}" rx="10"></rect><text class="fl-flabel" x="${f.x + 6}" y="${f.y + f.h - 6}">start together</text>`);
@@ -1400,9 +1444,11 @@ function flowBase(m, s) {
       const a = m.box.get(l.from_agent), d = m.box.get(l.decision);
       parts.push(`<path class="fl-reads" d="M${a.x + a.w / 2 + 18} ${a.y} C ${a.x + a.w / 2 + 18} ${a.y - 50}, ${d.x + d.w / 2 + 18} ${d.y + d.h + 50}, ${d.x + d.w / 2 + 18} ${d.y + d.h}"></path>`);
     } else if (l.kind === 'handoff' && m.box.has(l.decision) && m.box.has(l.to_agent)) {
-      const d = m.box.get(l.decision), a = m.box.get(l.to_agent), sh = l.share || 0;
-      parts.push(`<path class="fl-hand" stroke-width="${(1 + sh * 3.5).toFixed(2)}" marker-end="url(#fl-arr)" d="${flowCurve(d, a)}"></path>`);
-      if (sh < 1) parts.push(`<text class="fl-share" x="${(d.x + d.w / 2 + a.x + a.w / 2) / 2 + 4}" y="${(d.y + d.h + a.y) / 2 + 4}">${Math.round(sh * 100)}%</text>`);
+      const d = m.box.get(l.decision), a = m.box.get(l.to_agent), sh = l.share || 0, p = m.ports.get(l) || {};
+      parts.push(`<path class="fl-hand" stroke-width="${(1 + sh * 3.5).toFixed(2)}" marker-end="url(#fl-arr)" d="${flowCurve(d, a, p)}"></path>`);
+      // the share sits just under the decision, on the side its arrow does not bend towards
+      const x1 = p.x1 ?? d.x + d.w / 2, x2 = p.x2 ?? a.x + a.w / 2, right = x2 < x1;
+      if (sh < 1) parts.push(`<text class="fl-share" x="${x1 + (right ? 5 : -5)}" y="${d.y + d.h + 13}" text-anchor="${right ? 'start' : 'end'}">${Math.round(sh * 100)}%</text>`);
     } else if (l.kind === 'direct' && m.box.has(l.from_agent) && m.box.has(l.to_agent)) {
       parts.push(`<path class="fl-back" marker-end="url(#fl-arr)" d="${flowLoop(m.box.get(l.from_agent), m.box.get(l.to_agent))}"></path>`);
     }
@@ -1416,8 +1462,8 @@ function flowBase(m, s) {
   for (const d of m.decisions.values()) {
     const b = m.box.get(d.id); if (!b) continue;
     parts.push(`<g class="${cls('fl-dec', d.id)}"><rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="8"></rect>` +
-      `<text class="t1" x="${b.x + 8}" y="${b.y + 22}">${esc(fit(s.label(d.id), 20))}</text><text class="t2" x="${b.x + 8}" y="${b.y + 42}">${plural(d.calls, 'call')}</text>` +
-      `<text class="t2" x="${b.x + 8}" y="${b.y + 58}">${money(d.cost)}</text></g>`);
+      flowName(s.label(d.id), b, 8, pinned(b)) + `<text class="t2" x="${b.x + 8}" y="${b.y + (flowLines(s.label(d.id), b, pinned(b)) > 1 ? 48 : 42)}">${plural(d.calls, 'call')}</text>` +
+      `<text class="t2" x="${b.x + 8}" y="${b.y + (flowLines(s.label(d.id), b, pinned(b)) > 1 ? 63 : 58)}">${money(d.cost)}</text></g>`);
   }
   for (const a of m.agents.values()) {
     const b = m.box.get(a.id); if (!b || a.id === m.ag.router) continue;
@@ -1426,8 +1472,8 @@ function flowBase(m, s) {
       `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="10" class="fl-tint" fill-opacity="${(0.04 + (a.share || 0) * 1.4).toFixed(3)}"></rect>` +
       (h > 0.5 ? `<rect x="${b.x + 1}" y="${(b.y + b.h - h - 1).toFixed(1)}" width="${b.w - 2}" height="${h.toFixed(1)}" rx="6" class="fl-saved"></rect>` : '') +
       `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="10" class="fl-edge"></rect>` +
-      `<text class="t1" x="${b.x + 10}" y="${b.y + 22}">${esc(fit(s.label(a.id), 19))}</text><text class="t2" x="${b.x + 10}" y="${b.y + 42}">${a.runs} of ${m.runs} runs</text>` +
-      `<text class="t2${cut ? ' t-save' : ''}" x="${b.x + 10}" y="${b.y + 58}">${cut ? `${money(a.cost - cut)} · −${money(cut)}` : `${money(a.cost)} · ${share(a.cost, m.total)}`}</text></g>`);
+      flowName(s.label(a.id), b, 10, pinned(b)) + `<text class="t2" x="${b.x + 10}" y="${b.y + (flowLines(s.label(a.id), b, pinned(b)) > 1 ? 48 : 42)}">${a.runs} of ${m.runs} runs</text>` +
+      `<text class="t2${cut ? ' t-save' : ''}" x="${b.x + 10}" y="${b.y + (flowLines(s.label(a.id), b, pinned(b)) > 1 ? 63 : 58)}">${cut ? `${money(a.cost - cut)} · −${money(cut)}` : `${money(a.cost)} · ${share(a.cost, m.total)}`}</text></g>`);
   }
   return parts.join('');
 }
@@ -1438,7 +1484,7 @@ function flowTraffic(m) {
     dots.push(`<circle r="3.2" class="${cls}"><animateMotion dur="${dur}s" repeatCount="indefinite" begin="${(-i * dur / n).toFixed(2)}s" path="${d}"></animateMotion></circle>`); };
   for (const l of m.links) {
     if (l.kind === 'handoff' && m.box.has(l.decision) && m.box.has(l.to_agent))
-      along(flowCurve(m.box.get(l.decision), m.box.get(l.to_agent)), Math.max(1, Math.round((l.share || 0) * 4)), 3.2, 'fl-dot');
+      along(flowCurve(m.box.get(l.decision), m.box.get(l.to_agent), m.ports.get(l)), Math.max(1, Math.round((l.share || 0) * 4)), 3.2, 'fl-dot');
     if (l.kind === 'direct' && l.mode === 'return' && m.box.has(l.from_agent) && m.box.has(l.to_agent))
       along(flowLoop(m.box.get(l.from_agent), m.box.get(l.to_agent)), 1, 4, 'fl-dot loop');
   }
@@ -1684,7 +1730,8 @@ function renderLive(q, data, { visible = () => true } = {}) {
     tape.length = Math.min(tape.length, 40);
   };
   // tiles are made once and updated in place, so keyboard focus on one survives every update
-  q('liveHeat').innerHTML = model.map(w => `<button type="button" class="lv-tile" data-sym="${w.sym}">` +
+  q('liveHeat').dataset.n = String(Math.min(3, model.length));  // one or two workflows: their tiles fill the row
+  q('liveHeat').innerHTML = model.map(w => `<button type="button" class="lv-tile" data-sym="${w.sym}"><span class="lv-tint" aria-hidden="true"></span>` +
     `<span class="lv-th"><span class="lv-sym">${w.sym}</span><span class="lv-chg"></span></span><span class="lv-nm">${stepName(w.name)}</span>` +
     `<span class="lv-big"><span class="lv-pct">0%</span> <span class="lv-dim">saveable</span></span>` +
     `<svg class="lv-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"></svg><span class="lv-meta"><span class="lv-sp"></span><span class="lv-save lv-sv"></span></span></button>`).join('');
@@ -1714,7 +1761,7 @@ function renderLive(q, data, { visible = () => true } = {}) {
     for (const w of model) {
       const b = s.by[w.sym], t = tiles.get(w.sym), p = b.spend ? b.save / b.spend : 0, v = chg(b);
       if (!t) continue;
-      t.style.background = `rgba(76, 201, 240, ${(0.05 + p * 0.55).toFixed(3)})`;
+      t.querySelector('.lv-tint').style.opacity = Math.min(0.4, 0.05 + p * 0.45).toFixed(3);
       t.classList.toggle('sel', focus === w.sym);
       t.setAttribute('aria-label', `${plainName(w.name)}: ${Math.round(p * 100)}% saveable`);
       const e = t.querySelector('.lv-chg'); e.className = 'lv-chg ' + (v > 0 ? 'lv-up' : v < 0 ? 'lv-down' : 'lv-dim'); e.textContent = arrow(v);
@@ -1764,6 +1811,8 @@ function renderLive(q, data, { visible = () => true } = {}) {
     focus = focus === t.dataset.sym ? 'all' : t.dataset.sym;
     q('liveChartTitle').textContent = focus === 'all' ? 'All workflows · spend per minute' : `${focus} · spend per minute`; paint(); });
   reset(); warm();
+  // the candles are drawn on a canvas in the theme's colours: draw them again when the theme changes
+  if (typeof document !== 'undefined' && document.addEventListener) document.addEventListener(THEME_EVENT, drawChart);
   return { start() { clearTimeout(timer); last = Date.now(); tick(); }, stop() { clearTimeout(timer); timer = null; }, state: () => s, model };
 }
 
@@ -2050,6 +2099,9 @@ function render(root, data, opts = {}) {
   renderReport(root, data, opts);
   return { show() {}, overview() {} };
 }
+
+// the event static/theme.js sends when the theme changes (the live demo redraws its canvas in the new colours)
+const THEME_EVENT = 'openly7-theme';
 
 window.ProfilerReport = { render, restoreNames, liveSimulate };
 })();
