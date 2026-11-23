@@ -322,6 +322,32 @@ def test_stopping_the_app_deletes_the_files_it_copied(tmp_path):
     assert not list(tmp_path.glob("profiler-client-app-*"))
 
 
+def test_a_killed_apps_files_are_deleted_when_the_app_next_starts(tmp_path):
+    # killed outright (SIGKILL, or TerminateProcess on Windows): no handler runs, so the folder stays
+    env = {**os.environ, "TMPDIR": str(tmp_path), "TEMP": str(tmp_path), "TMP": str(tmp_path),
+           "XDG_DATA_HOME": str(tmp_path / "data")}
+
+    def start():
+        proc = subprocess.Popen([sys.executable, "-m", "profiler_client.cli", "app", "--no-browser"],
+                                stdout=subprocess.PIPE, text=True, env=env, encoding="utf-8")
+        assert re.search(r"http://127\.0\.0\.1:\d+/\?t=", proc.stdout.readline() + proc.stdout.readline()
+                         + proc.stdout.readline())
+        return proc
+
+    first = start()
+    [left] = tmp_path.glob("profiler-client-app-*")
+    first.kill()
+    first.wait(timeout=30)
+    assert left.exists()
+    second = start()
+    try:
+        [workdir] = tmp_path.glob("profiler-client-app-*")
+        assert workdir != left and not left.exists()
+    finally:
+        second.kill()
+        second.wait(timeout=30)
+
+
 @pytest.mark.skipif(os.name == "nt", reason="a process can't be sent SIGINT on Windows; Ctrl+C there is checked by hand (#58)")
 def test_ctrl_c_deletes_the_files_it_copied(tmp_path):
     # Ctrl+C is SIGINT, which Python's own handler raises as KeyboardInterrupt: not the SIGTERM

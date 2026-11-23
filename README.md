@@ -50,8 +50,11 @@ request without that cookie is refused. The token you paste is held in memory
 only. Your files are copied to a temporary folder that is deleted after
 preparing, and everything else is deleted when the app exits (Ctrl-C). An
 app that is interrupted, for example killed, or on Windows ended by a sign-out
-or shutdown, can leave the folder behind; deleting it at the next start is
-planned ([#58](https://github.com/ipintotech-lab/profiler-client/issues/58)).
+or shutdown, can leave the folder behind; the app deletes it the next time it
+starts. Each folder records the app process that made it, so a folder of an app
+still running is kept; a folder that can't be matched to an app (for example
+one left by a client before 0.40.0) is kept, and the app prints the command to
+delete it.
 `--server` picks another Openly7 address, `--port` a fixed port,
 `--no-browser` just prints the address and `--prices-file` gives prices per
 model, as for `check`, instead of the page's two price boxes.
