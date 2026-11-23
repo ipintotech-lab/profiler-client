@@ -21,7 +21,6 @@ import re
 import secrets
 import shutil
 import signal
-import tempfile
 import threading
 import urllib.error
 import urllib.parse
@@ -33,6 +32,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from . import prices as token_prices
+from . import workdirs
 from .cli import parse_report, prepare_check, prepare_dataset, report_title, restore_names
 from .dataset import EVENTS, PrepareError
 from .names import Names
@@ -403,7 +403,8 @@ def serve(server: str, port: int = 0, open_browser: bool = True, prices: token_p
     signal.signal(signal.SIGTERM, _stop)
     if hasattr(signal, "SIGBREAK"):  # Windows: Ctrl-Break
         signal.signal(signal.SIGBREAK, _stop)
-    workdir = Path(tempfile.mkdtemp(prefix="profiler-client-app-"))  # mode 0700
+    workdirs.sweep()  # folders left by an app that was killed
+    workdir = workdirs.make()  # mode 0700
     _on_close = delete_on_console_close(workdir) if os.name == "nt" else None  # kept alive while serving
     try:
         httpd = AppServer(port, Session(workdir, origin, prices))

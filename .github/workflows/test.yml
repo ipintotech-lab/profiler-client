@@ -38,6 +38,17 @@ jobs:
       - run: pip install -e '.[dev]'
       - run: pytest -q -rs
 
+  test-macos:
+    # leftover working folders: macOS tells a process's start time with ps, not /proc (#58)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e '.[dev]'
+      - run: pytest -q tests/test_workdirs.py tests/test_app.py -k "workdirs or folder or killed or stopping or ctrl_c"
+
   smoke-windows:
     # the installed command as a user runs it on Windows: a regular (not editable) install,
     # profiler-client.exe from PowerShell and cmd with the console's own code page, paths with
