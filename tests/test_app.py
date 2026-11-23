@@ -217,6 +217,52 @@ def test_the_report_comes_back_with_real_names(local, openly7, transcript_file, 
             assert CLIENT_TOKEN.encode() not in path.read_bytes(), path
 
 
+@pytest.fixture
+def priced(tmp_path, monkeypatch, openly7):
+    """The app as ``app --prices-file`` starts it: a public id, a private one and a default."""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    work = tmp_path / "work"
+    work.mkdir(mode=0o700)
+    prices = {"claude-opus-4-1": (15.0, 75.0), "acme-llm-v3": (1.0, 2.0), "*": (3.0, 15.0)}
+    server = app.AppServer(0, app.Session(work, f"http://127.0.0.1:{openly7.server_port}", prices))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield server
+    server.shutdown()
+    server.server_close()
+
+
+def test_prices_file_prices_go_keyed_as_the_dataset_names_the_models(priced, openly7, tmp_path, transcript_rows):
+    rows = [dict(r) for r in transcript_rows]
+    for r in rows[2:]:  # one private model id next to the public one
+        if r["type"] == "assistant":
+            r["message"] = {**r["message"], "model": "acme-llm-v3"}
+            break
+    trace = tmp_path / "session.jsonl"
+    trace.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    assert request(priced, "PUT", f"/api/raw?name={trace.name}", trace.read_bytes())[0] == 200
+    code, _, body = request(priced, "POST", "/api/prepare", {})
+    assert code == 200 and json.loads(body)["prices_file"] == ["*", "acme-llm-v3", "claude-opus-4-1"]
+    code, _, body = request(priced, "POST", "/api/submit", {"token": CLIENT_TOKEN, "prices": [1, 2]})
+    assert code == 400 and b"--prices-file" in body  # the page's boxes don't mix with the file
+    code, _, body = request(priced, "POST", "/api/submit", {"token": CLIENT_TOKEN, "prices": None})
+    assert code == 200, body
+
+    models = {e["model"] for e in openly7.events if e.get("model")}
+    (private,) = models - {"claude-opus-4-1"}
+    assert "acme" not in private
+    assert openly7.job == {"kind": "overview", "token_prices": {
+        "claude-opus-4-1": [15.0, 75.0], private: [1.0, 2.0], "*": [3.0, 15.0]}}
+    assert b"acme-llm-v3" not in openly7.seen[0]["body"] and b"acme-llm-v3" not in json.dumps(openly7.job).encode()
+
+
+def test_a_bad_prices_file_stops_the_app_before_it_opens(tmp_path, capsys):
+    from profiler_client import cli
+    bad = tmp_path / "p.json"
+    bad.write_text('{"gpt-5": [1, 2000000]}', encoding="utf-8")
+    assert cli.main(["app", "--no-browser", "--prices-file", str(bad)]) == 1
+    assert "over 1e+06" in capsys.readouterr().err
+
+
 def test_the_files_copied_in_are_deleted_once_prepared(local, transcript_file):
     request(local, "PUT", f"/api/raw?name=../../{transcript_file.name}", transcript_file.read_bytes())
     copied = list(local.session.raw.rglob("*.jsonl"))

@@ -38,7 +38,9 @@ equal.
 
 - the `events.jsonl` above;
 - the client token (`pc_…`) you paste in, as the `Authorization` header. It is held in the app's memory and never saved;
-- the analysis settings: the kind of report and, if you give them, the two token prices;
+- the analysis settings: the kind of report and, if you give them, the two token prices, or with
+  `--prices-file` the prices per model, keyed by the model names the dataset carries (pseudonyms for
+  models outside the public list);
 - a random `Idempotency-Key` per request, so a retried request doesn't run twice.
 
 It downloads the report. The report holds pseudonyms only; the app restores
