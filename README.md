@@ -14,7 +14,7 @@ Python 3.10 or later; the only dependency is pydantic. Install a release from
 GitHub and check the version:
 
 ```
-pip install https://github.com/ipintotech-lab/profiler-client/archive/refs/tags/v0.38.0.tar.gz
+pip install https://github.com/ipintotech-lab/profiler-client/archive/refs/tags/v0.39.0.tar.gz
 profiler-client --version
 ```
 
@@ -87,6 +87,11 @@ access of the folder it is written to); no report data is sent anywhere. It
 restores only from the list for that exact dataset, says how many pseudonyms it
 couldn't match, and — since the HTML holds your real values — keep it local
 rather than re-uploading or sharing it.
+
+The page has a light and a dark theme. It follows your system setting until you
+press the sun/moon button next to "Print or save as PDF"; your browser then
+remembers that choice (only the word `light` or `dark`, in its local storage for
+the page). Printing and PDFs always use the light theme.
 
 `names` exports the same names as a name map (`report.names.json`, owner-only on
 Mac and Linux) for that report's datasets only. Load it in the Openly7 report page

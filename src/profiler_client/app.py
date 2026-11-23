@@ -207,10 +207,10 @@ class Session:
         job = self.remote.job(self.job_id)
         if job["status"] == "COMPLETED" and job.get("result_id"):
             raw = self.remote.result(job["result_id"])
-            report, found, missing, _, _ = restore_names(parse_report(raw))
+            report, found, _, _, _ = restore_names(parse_report(raw))
             self.report_json = raw
             self.report_html = render_html(report, report_title(report, "Your report"),
-                                           restored=len(found), unmatched=len(missing))
+                                           restored=len(found))
             return {"status": "COMPLETED", "report": True}
         return {"status": job["status"], "error": job.get("error")}
 

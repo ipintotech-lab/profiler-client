@@ -221,8 +221,9 @@ def test_open_draws_the_report_with_the_shared_renderer(tmp_path, monkeypatch):
     assert (STATIC / "report.js").read_text(encoding="utf-8") in rendered
     assert (STATIC / "report.css").read_text(encoding="utf-8") in rendered
     assert "ProfilerReport.render(" in rendered
+    assert (STATIC / "theme.js").read_text(encoding="utf-8") in rendered
     assert "<script>alert(1)" not in rendered
-    assert rendered.count("</script>") == 3  # the data, the renderer and the call: nothing from the report
+    assert rendered.count("</script>") == 4  # the data, the theme, the renderer and the call: nothing from the report
 
 
 def test_open_marks_the_page_restored_only_when_a_name_was_matched(tmp_path, monkeypatch):

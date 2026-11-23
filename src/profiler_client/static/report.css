@@ -1,23 +1,25 @@
 /* The AI Agent Profiler report, drawn by report.js into an element with class "sheet".
-   Everything is scoped to .sheet, so a host page keeps its own styles. */
+   Everything is scoped to .sheet, so a host page keeps its own styles.
+   Its colours are the --o7-* variables of theme.css, which a host loads first. */
 .sheet {
-  --paper: #f4f5f8;
-  --sheet: #ffffff;
-  --ink: #1d2033;
-  --ink-2: #4a4e66;
-  --rule: #d7d9e3;
-  --carbon: #3a3e9e;
-  --carbon-deep: #2b2e7a;
-  --pseudo: #e3e4f6;
-  --estimate: #8a5a00;
-  --estimate-bg: #f8edd3;
-  --bad: #a1262d;
-  --bad-bg: #f9e3e4;
-  --shared: #1f6b5c;
+  --paper: var(--o7-paper);
+  --sheet: var(--o7-sheet);
+  --ink: var(--o7-ink);
+  --ink-2: var(--o7-ink-2);
+  --rule: var(--o7-rule);
+  --carbon: var(--o7-accent);
+  --carbon-deep: var(--o7-accent-deep);
+  --pseudo: var(--o7-accent-soft);
+  --estimate: var(--o7-estimate);
+  --estimate-bg: var(--o7-estimate-bg);
+  --bad: var(--o7-bad);
+  --bad-bg: var(--o7-bad-bg);
+  --shared: var(--o7-shared);
   --sans: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
   --mono: "Spline Sans Mono", ui-monospace, Menlo, Consolas, monospace;
   color: var(--ink); font-family: var(--sans); font-size: 16px; line-height: 1.55;
   background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; padding: 28px 32px 32px;
+  container: sheet / inline-size;  /* the flow and the live demo stack by the report's width, not the window's */
 }
 .sheet *, .sheet *::before, .sheet *::after { box-sizing: border-box; }
 .sheet h2, .sheet h3, .sheet p, .sheet ul, .sheet dl, .sheet dd { margin: 0; padding: 0; }
@@ -59,7 +61,7 @@
 
 /* the workflow map */
 .sheet section.map { margin-top: 24px; break-inside: avoid; }
-.sheet .mapbox { margin-top: 12px; --edge: #7d81a8; }
+.sheet .mapbox { margin-top: 12px; --edge: var(--o7-edge); }
 .sheet .mapscroll { overflow-x: auto; }
 .sheet .mapbox svg { display: block; width: 100%; height: auto; font-family: var(--sans); }
 .sheet .mapbox .node rect { fill: var(--sheet); stroke: var(--rule); stroke-width: 1.5; }
@@ -105,9 +107,9 @@
 .sheet .mapbox .badge.unstable rect, .sheet .pill.unstable { fill: var(--bad); background: var(--bad); }
 .sheet .mapbox .badge.review rect, .sheet .pill.review { fill: var(--ink-2); background: var(--ink-2); }
 .sheet .mapbox .badge.shared rect, .sheet .pill.shared { fill: var(--shared); background: var(--shared); }
-.sheet .mapbox .badge text { fill: #fff; }
+.sheet .mapbox .badge text { fill: var(--o7-on-strong); }
 .sheet .mapbox .legend.marks { margin: 0 0 12px; }
-.sheet .pill { display: inline-block; color: #fff; font-style: normal; font-size: 12px; font-weight: 700; border-radius: 10px; padding: 1px 9px; margin-right: 6px; }
+.sheet .pill { display: inline-block; color: var(--o7-on-strong); font-style: normal; font-size: 12px; font-weight: 700; border-radius: 10px; padding: 1px 9px; margin-right: 6px; }
 .sheet .mapbox .node.pick:focus-visible { outline: none; }
 .sheet .mapbox .node.pick:focus-visible rect { stroke: var(--carbon); stroke-width: 4; }
 .sheet .pill, .sheet .mapbox .badge { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -154,7 +156,7 @@
 .sheet .key { display: inline-flex; align-items: center; gap: 6px; margin-right: 16px; }
 .sheet .key b, .sheet .spendbar i { background: var(--carbon); }
 .sheet .key b { width: 14px; height: 10px; border-radius: 2px; display: inline-block; }
-.sheet .key b.rep, .sheet .spendbar i.rep { background: repeating-linear-gradient(135deg, var(--carbon) 0 3px, #8e91d6 3px 6px); }
+.sheet .key b.rep, .sheet .spendbar i.rep { background: repeating-linear-gradient(135deg, var(--carbon) 0 3px, var(--o7-accent-mid) 3px 6px); }
 .sheet .spendbar { height: 10px; background: var(--pseudo); border-radius: 2px; position: relative; overflow: hidden; margin-top: 7px; }
 .sheet .spendbar i { position: absolute; top: 0; bottom: 0; left: 0; }
 .sheet .key b, .sheet .spendbar, .sheet .spendbar i { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -229,9 +231,9 @@
 .sheet .mapbox .am { cursor: pointer; }
 .sheet .mapbox .am rect { stroke: var(--carbon); stroke-width: 1.5; }
 .sheet .mapbox .am.f0 rect { fill: var(--sheet); }
-.sheet .mapbox .am.f1 rect { fill: #e3e4f6; }
-.sheet .mapbox .am.f2 rect { fill: #c6c9ee; }
-.sheet .mapbox .am.f3 rect { fill: #a6abe2; }
+.sheet .mapbox .am.f1 rect { fill: var(--o7-f1); }
+.sheet .mapbox .am.f2 rect { fill: var(--o7-f2); }
+.sheet .mapbox .am.f3 rect { fill: var(--o7-f3); }
 .sheet .mapbox .am.router rect { fill: var(--paper); stroke: var(--rule); }
 .sheet .mapbox .am.unstable rect { stroke: var(--bad); stroke-width: 2.5; stroke-dasharray: 6 4; }
 .sheet .mapbox .am.chip rect { stroke-width: 1; }
@@ -244,7 +246,7 @@
 .sheet .mapbox .am .s, .sheet .mapbox .am .c { fill: var(--ink); font-size: 12px; font-family: var(--mono); }
 .sheet .mapbox .am.f0 .s, .sheet .mapbox .am.router .s { fill: var(--ink-2); }
 .sheet .mapbox .am .w { fill: var(--ink); font-size: 12px; font-weight: 600; }
-.sheet .mapbox .am .w .bad { fill: #7a161c; } /* a deeper red: 4.9:1 on the darkest fill */
+.sheet .mapbox .am .w .bad { fill: var(--o7-bad-deep); } /* a deeper red: AA on the darkest fill */
 .sheet .mapbox .am circle.no { fill: var(--ink); stroke: var(--sheet); stroke-width: 2; }
 .sheet .mapbox .am text.no { fill: var(--sheet); font-size: 13px; font-weight: 700; }
 .sheet .mapbox .together rect { fill: none; stroke: var(--ink-2); stroke-dasharray: 3 3; }
@@ -252,9 +254,9 @@
 .sheet .agentmap .edge { stroke-width: 1.75; }
 .sheet .mapbox .edge.return { stroke-dasharray: 7 5; }
 .sheet .mapbox .sw.f0 { background: var(--sheet); border-color: var(--carbon); margin-right: 2px; }
-.sheet .mapbox .sw.f1 { background: #e3e4f6; border-color: var(--carbon); margin-right: 2px; }
-.sheet .mapbox .sw.f2 { background: #c6c9ee; border-color: var(--carbon); margin-right: 2px; }
-.sheet .mapbox .sw.f3 { background: #a6abe2; border-color: var(--carbon); }
+.sheet .mapbox .sw.f1 { background: var(--o7-f1); border-color: var(--carbon); margin-right: 2px; }
+.sheet .mapbox .sw.f2 { background: var(--o7-f2); border-color: var(--carbon); margin-right: 2px; }
+.sheet .mapbox .sw.f3 { background: var(--o7-f3); border-color: var(--carbon); }
 .sheet .mapbox .sw.no { width: 18px; height: 18px; border-radius: 50%; background: var(--ink); color: var(--sheet); border-color: var(--ink); font: 700 12px/16px var(--sans); text-align: center; font-style: normal; }
 .sheet .mapbox .sw.dash { border: 2px dashed var(--bad); background: var(--sheet); }
 .sheet .mapbox svg.ln { display: inline; width: 28px; height: 8px; vertical-align: middle; margin-right: 6px; }
@@ -346,7 +348,7 @@
 .sheet .sv-act ol { margin: 6px 0 0; padding-left: 20px; }
 @media (max-width: 560px) { .sheet .sv-act { grid-template-columns: auto minmax(0, 1fr); } .sheet .sv-act .money { grid-column: 2; text-align: left; } }
 .sheet .pill { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 9px; border-radius: 99px; white-space: nowrap; }
-.sheet .pill.ready { background: #e1f3e9; color: var(--shared); }
+.sheet .pill.ready { background: var(--o7-shared-bg); color: var(--shared); }
 .sheet .pill.review { background: var(--estimate-bg); color: var(--estimate); }
 .sheet .pill.invest { background: var(--bad-bg); color: var(--bad); }
 .sheet .sv-also { margin-top: 10px; border: 1px dashed var(--rule); border-radius: 10px; padding: 12px 16px; font-size: 14px; }
@@ -356,33 +358,54 @@
 /* the overview's views as tabs */
 .sheet .sv-tabs { display: flex; gap: 4px; margin-top: 16px; background: var(--paper); padding: 4px; border-radius: 10px; width: max-content; max-width: 100%; overflow-x: auto; }
 .sheet .sv-tabs button { font: 600 14px var(--sans); border: 0; background: transparent; color: var(--ink-2); padding: 7px 14px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
-.sheet .sv-tabs button[aria-selected="true"] { background: var(--carbon); color: #fff; }
+.sheet .sv-tabs button[aria-selected="true"] { background: var(--carbon); color: var(--o7-on-accent); }
+/* a phone: the three tabs share the row and none is cut off */
+@media (max-width: 480px) {
+  .sheet .sv-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: auto; }
+  .sheet .sv-tabs button { padding: 7px 4px; font-size: 13px; white-space: normal; line-height: 1.2; }
+}
 @media print { .sheet .sv-tabs { display: none; } .sheet [role="tabpanel"][hidden] { display: block !important; } }
 
 /* the agent flow */
+.sheet .fl-none { margin-top: 16px; }
 .sheet .fl-bar, .sheet .fl-ctl { display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; justify-content: space-between; margin-top: 16px; }
 .sheet .fl-ctl { justify-content: flex-start; font-size: 14px; }
 .sheet .fl-ctl label, .sheet .fl-pick { display: inline-flex; gap: 6px; align-items: center; font-weight: 600; }
 .sheet .fl-ctl input { width: 17px; height: 17px; accent-color: var(--carbon); }
-.sheet .fl-btn { font: 600 14px var(--sans); border: 0; background: var(--carbon); color: #fff; padding: 7px 14px; border-radius: 8px; cursor: pointer; }
+.sheet .fl-btn { font: 600 14px var(--sans); border: 0; background: var(--carbon); color: var(--o7-on-accent); padding: 7px 14px; border-radius: 8px; cursor: pointer; }
 .sheet .fl-sum { font-size: 16px; }
 .sheet .fl-run { margin-top: 10px; background: var(--pseudo); border-radius: 8px; padding: 8px 12px; font-size: 14px; }
-.sheet .fl-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; margin-top: 12px; }
-@media (max-width: 960px) { .sheet .fl-grid { grid-template-columns: 1fr; } }
+.sheet .fl-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; margin-top: 12px; align-items: stretch; }
+/* the diagram sets the row's height; the remarks scroll beside it instead of stretching the diagram's panel */
+.sheet .fl-side { position: relative; min-height: 320px; padding: 0; }
+.sheet .fl-sidein { position: absolute; inset: 0; overflow-y: auto; padding: 12px; }
+@container sheet (max-width: 960px) {  /* the report's own width: a host may give it a narrow column */
+  .sheet .fl-grid { grid-template-columns: 1fr; }
+  .sheet .fl-side { min-height: 0; }
+  .sheet .fl-sidein { position: static; overflow: visible; }
+}
 .sheet .fl-card { border: 1px solid var(--rule); border-radius: 10px; padding: 12px; min-width: 0; }
 .sheet .fl-scroll { overflow-x: auto; }
+/* the diagram never shrinks below 720px, where its labels stop being readable: a narrower box (a phone) scrolls it
+   sideways, and says so, or it looks cut off */
+.sheet .fl-card:has(> .fl-scroll) { container: flcard / inline-size; }
+.sheet .fl-hint { display: none; margin: 0 0 8px; font-size: 13px; color: var(--ink-2); }
+@container flcard (max-width: 719.98px) { .sheet .fl-hint { display: block; } }
+@media print { .sheet .fl-hint { display: none !important; } }
 .sheet .fl-svg { width: 100%; min-width: 720px; height: auto; display: block; }
 .sheet .fl-svg .t1 { fill: var(--ink); font: 700 12px var(--sans); }
 .sheet .fl-svg .t2 { fill: var(--ink-2); font: 500 11px var(--mono); }
 .sheet .fl-svg .t-save { fill: var(--shared); font-weight: 700; }
+/* a halo in the surface colour: the names and figures stay readable on any tint, the saved band and in both themes */
+.sheet .fl-agent text, .sheet .fl-dec text { paint-order: stroke; stroke: var(--sheet); stroke-width: 3px; stroke-linejoin: round; }
 .sheet .fl-router rect { fill: var(--carbon); }
-.sheet .fl-router text { fill: #fff; font: 700 13px var(--sans); }
+.sheet .fl-router text { fill: var(--o7-on-accent); font: 700 13px var(--sans); }
 .sheet .fl-router.is-live rect { fill: var(--carbon-deep); }
 .sheet .fl-dec rect { fill: var(--sheet); stroke: var(--carbon); stroke-width: 1.5; stroke-dasharray: 4 3; }
 .sheet .fl-agent .fl-bg { fill: var(--sheet); }
 .sheet .fl-agent .fl-tint { fill: var(--carbon); }
 .sheet .fl-agent .fl-edge { fill: none; stroke: var(--rule); stroke-width: 1.2; }
-.sheet .fl-saved { fill: #4cc9f0; opacity: .55; }
+.sheet .fl-saved { fill: var(--o7-save); opacity: .35; }
 .sheet .hl rect.fl-edge, .sheet .fl-dec.hl rect { stroke: var(--bad); stroke-width: 2.5; }
 .sheet .is-live rect.fl-edge, .sheet .fl-dec.is-live rect { stroke: var(--bad); stroke-width: 3; }
 .sheet .fl-frame { fill: none; stroke: var(--ink-2); stroke-dasharray: 2 4; }
@@ -391,29 +414,29 @@
 .sheet .fl-arrow { fill: var(--carbon); }
 .sheet .fl-reads { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 3 4; fill: none; opacity: .7; }
 .sheet .fl-back { stroke: var(--estimate); stroke-width: 2; stroke-dasharray: 6 4; fill: none; }
-.sheet .fl-share { fill: var(--carbon); font: 700 10.5px var(--mono); }
+.sheet .fl-share { fill: var(--carbon); font: 700 10.5px var(--mono); paint-order: stroke; stroke: var(--sheet); stroke-width: 4px; stroke-linejoin: round; }
 .sheet .fl-dot { fill: var(--carbon); opacity: .85; }
 .sheet .fl-dot.loop { fill: var(--estimate); }
 .sheet .fl-token { fill: var(--bad); stroke: var(--sheet); stroke-width: 3; }
 .sheet .fl-pin circle { fill: var(--bad); stroke: var(--sheet); stroke-width: 2; }
 .sheet .fl-pin.plain circle { fill: var(--ink-2); }
 .sheet .fl-pin.on circle { fill: var(--carbon-deep); }
-.sheet .fl-pin text { fill: #fff; font: 800 11px var(--sans); }
+.sheet .fl-pin text { fill: var(--o7-on-strong); font: 800 11px var(--sans); }
 .sheet .fl-remarks { list-style: none; margin: 8px 0 10px; padding: 0; display: grid; gap: 8px; }
 .sheet .fl-remarks li { display: grid; grid-template-columns: 26px 1fr; gap: 8px; font-size: 13.5px; padding: 6px; border-radius: 8px; border: 1px solid transparent; }
 .sheet .fl-remarks li.on { border-color: var(--rule); background: var(--paper); }
-.sheet .fl-n { width: 24px; height: 24px; border-radius: 50%; border: 0; background: var(--bad); color: #fff; font: 800 12px var(--sans); cursor: pointer; }
+.sheet .fl-n { width: 24px; height: 24px; border-radius: 50%; border: 0; background: var(--bad); color: var(--o7-on-strong); font: 800 12px var(--sans); cursor: pointer; }
 .sheet .fl-n.plain { background: var(--ink-2); }
 .sheet .fl-sv { font-family: var(--mono); font-weight: 700; color: var(--shared); }
 .sheet .fl-legend .fl-k { display: inline-block; width: 18px; height: 0; vertical-align: middle; margin-right: 6px; border-top: 3px solid var(--carbon); }
 .sheet .fl-legend .fl-k.reads { border-top: 1px dashed var(--ink-2); }
 .sheet .fl-legend .fl-k.loop { border-top: 2px dashed var(--estimate); }
-.sheet .fl-legend .fl-k.tint { height: 10px; width: 10px; border: 1px solid var(--rule); background: rgba(58, 62, 158, .25); }
+.sheet .fl-legend .fl-k.tint { height: 10px; width: 10px; border: 1px solid var(--rule); background: var(--carbon); opacity: .3; }
 @media (prefers-reduced-motion: reduce) { .sheet .fl-dot { display: none; } }
 
-/* the live demo: a dark trading terminal, the same in both themes */
+/* the live demo: a trading terminal in the page's theme */
 .sheet .lv-note { margin-top: 16px; font-size: 14px; color: var(--ink-2); }
-.sheet .lv-term { --lv-bg: #0b0e17; --lv-panel: #121726; --lv-line: #232a3f; --lv-ink: #e6e9f2; --lv-dim: #8a93ad; --lv-up: #ff5d5d; --lv-down: #2fd27f; --lv-amber: #ffc24b; --lv-save: #4cc9f0; --lv-brand: #9da2ff;
+.sheet .lv-term { --lv-bg: var(--o7-paper); --lv-panel: var(--o7-sheet); --lv-line: var(--o7-rule); --lv-ink: var(--o7-ink); --lv-dim: var(--o7-ink-2); --lv-up: var(--o7-up); --lv-down: var(--o7-down); --lv-amber: var(--o7-estimate); --lv-save: var(--o7-save); --lv-brand: var(--o7-accent);
   margin-top: 12px; background: var(--lv-bg); color: var(--lv-ink); border: 1px solid var(--lv-line); border-radius: 12px; overflow: hidden; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .sheet .lv-top { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--lv-line); }
 .sheet .lv-name { font-family: var(--sans); font-weight: 800; }
@@ -427,24 +450,28 @@
 .sheet .lv-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--lv-line); }
 @media (max-width: 860px) { .sheet .lv-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .sheet .lv-kpi { background: var(--lv-panel); border: 1px solid var(--lv-line); border-radius: 10px; padding: 12px; display: grid; gap: 4px; min-width: 0; }
-.sheet .lv-krow { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.sheet .lv-krow { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px 6px; }
 .sheet .lv-l { font: 600 11px var(--sans); color: var(--lv-dim); letter-spacing: .08em; text-transform: uppercase; }
 .sheet .lv-v { font-size: 23px; font-weight: 700; line-height: 1.15; }
 .sheet .lv-u { font-size: 12px; color: var(--lv-dim); font-weight: 500; }
 .sheet .lv-c { font-size: 11.5px; }
-.sheet .lv-badge { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 99px; background: #1c2234; color: var(--lv-dim); white-space: nowrap; }
-.sheet .lv-badge.up { background: #2a1b22; color: var(--lv-up); } .sheet .lv-badge.down { background: #123222; color: var(--lv-down); }
-.sheet .lv-badge.save { background: #10303d; color: var(--lv-save); } .sheet .lv-badge.amber { background: #3a2d10; color: var(--lv-amber); }
+.sheet .lv-badge { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 99px; background: var(--lv-line); color: var(--lv-ink); white-space: nowrap; }
+.sheet .lv-badge.up { background: var(--o7-bad-bg); color: var(--lv-up); } .sheet .lv-badge.down { background: var(--o7-shared-bg); color: var(--lv-down); }
+.sheet .lv-badge.save { background: var(--o7-save-bg); color: var(--lv-save); } .sheet .lv-badge.amber { background: var(--o7-estimate-bg); color: var(--lv-amber); }
 .sheet .lv-spark { width: 100%; height: 30px; display: block; }
-.sheet .lv-spark .f { fill: rgba(157, 162, 255, .18); } .sheet .lv-spark .l { fill: none; stroke: var(--lv-brand); stroke-width: 1.6; vector-effect: non-scaling-stroke; } .sheet .lv-spark circle { fill: var(--lv-brand); }
-.sheet .lv-spark.amber .f { fill: rgba(255, 194, 75, .16); } .sheet .lv-spark.amber .l { stroke: var(--lv-amber); } .sheet .lv-spark.amber circle { fill: var(--lv-amber); }
-.sheet .lv-meter { position: relative; height: 10px; border-radius: 99px; background: #1c2234; margin: 10px 0 8px; }
+.sheet .lv-spark .f { fill: var(--lv-brand); fill-opacity: .18; } .sheet .lv-spark .l { fill: none; stroke: var(--lv-brand); stroke-width: 1.6; vector-effect: non-scaling-stroke; } .sheet .lv-spark circle { fill: var(--lv-brand); }
+.sheet .lv-spark.amber .f { fill: var(--lv-amber); fill-opacity: .16; } .sheet .lv-spark.amber .l { stroke: var(--lv-amber); } .sheet .lv-spark.amber circle { fill: var(--lv-amber); }
+.sheet .lv-meter { position: relative; height: 10px; border-radius: 99px; background: var(--lv-line); margin: 10px 0 8px; }
 .sheet .lv-meter span { position: absolute; inset: 0 auto 0 0; border-radius: 99px; background: var(--lv-save); transition: width .4s; }
 .sheet .lv-meter i { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--lv-ink); opacity: .7; }
 .sheet .lv-hhead { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px; padding: 10px 14px 0; font: 600 11px var(--sans); color: var(--lv-dim); letter-spacing: .06em; text-transform: uppercase; }
 .sheet .lv-heat { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 8px 14px 12px; border-bottom: 1px solid var(--lv-line); }
-@media (max-width: 640px) { .sheet .lv-heat { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.sheet .lv-tile { border: 1px solid var(--lv-line); border-radius: 10px; padding: 10px 12px; cursor: pointer; display: grid; gap: 2px; min-width: 0; text-align: left; color: var(--lv-ink); font: inherit; background: var(--lv-panel); }
+.sheet .lv-heat[data-n="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.sheet .lv-heat[data-n="1"] { grid-template-columns: minmax(0, 1fr); }  /* one workflow: its tile spans the row */
+@media (max-width: 640px) { .sheet .lv-heat:not([data-n="1"]) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.sheet .lv-tile { position: relative; isolation: isolate; overflow: hidden; border: 1px solid var(--lv-line); border-radius: 10px; padding: 10px 12px; cursor: pointer; display: grid; gap: 2px; min-width: 0; text-align: left; color: var(--lv-ink); font: inherit; background: var(--lv-panel); }
+/* the tint: the share of spend that's saveable, kept light enough for the tile's text in both themes */
+.sheet .lv-tint { position: absolute; inset: 0; z-index: -1; background: var(--o7-tint); opacity: .05; pointer-events: none; }
 .sheet .lv-tile.sel { outline: 2px solid var(--lv-brand); outline-offset: -1px; }
 .sheet .lv-th, .sheet .lv-meta { display: flex; justify-content: space-between; gap: 6px; }
 .sheet .lv-meta { font-size: 11.5px; }
@@ -454,17 +481,22 @@
 .sheet .lv-big .lv-dim { font-size: 11px; font-weight: 500; }
 .sheet .lv-tile .lv-spark { height: 22px; }
 .sheet .lv-grid { display: grid; grid-template-columns: 1.55fr 1fr; }
-@media (max-width: 900px) { .sheet .lv-grid { grid-template-columns: 1fr; } }
+@container sheet (max-width: 900px) { .sheet .lv-grid { grid-template-columns: 1fr; } .sheet .lv-grid > .lv-panel { border-right: 0; } .sheet .lv-grid > .lv-panel + .lv-panel { border-top: 1px solid var(--lv-line); } }
 .sheet .lv-panel { padding: 12px 14px; border-right: 1px solid var(--lv-line); min-width: 0; }
 .sheet .lv-grid > .lv-panel:last-child { border-right: 0; }
 .sheet .lv-panel h3 { display: flex; justify-content: space-between; gap: 8px; font: 600 11px var(--sans); color: var(--lv-dim); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 8px; }
 .sheet .lv-canvas { width: 100%; height: 230px; display: block; }
-.sheet .lv-tape { list-style: none; margin: 0; padding: 0; font-size: 12px; height: 230px; overflow: hidden; }
-.sheet .lv-tape li { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--lv-line); }
-.sheet .lv-tape li.is-save { background: rgba(76, 201, 240, .08); }
+/* eight whole rows, the height of the chart beside it: the last row is never cut */
+.sheet .lv-tape { list-style: none; margin: 0; padding: 0; font-size: 12px; height: 232px; overflow: hidden; }
+.sheet .lv-tape li { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 8px; align-items: center; height: 29px; padding: 0 2px; border-bottom: 1px solid var(--lv-line); white-space: nowrap; }
+.sheet .lv-tape li.is-save { background: var(--o7-save-bg); }
 .sheet .lv-st { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sheet .lv-tape .step { color: inherit; }
 .sheet .lv-foot { padding: 8px 14px; border-top: 1px solid var(--lv-line); font-size: 11.5px; color: var(--lv-dim); display: flex; flex-wrap: wrap; gap: 6px 18px; }
 .sheet .lv-empty { padding: 16px; color: var(--lv-dim); }
 @media (prefers-reduced-motion: reduce) { .sheet .lv-live i, .sheet .lv-meter span { animation: none; transition: none; } }
 @media print { .sheet .lv-term { display: none; } }
+
+/* the theme toggle the host adds to .tools (ProfilerReport.themeToggle): a sun in the dark theme, a moon in the light */
+.sheet .theme-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 44px; min-height: 32px; }
+.sheet .theme-toggle svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }

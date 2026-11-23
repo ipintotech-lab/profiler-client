@@ -47,7 +47,7 @@ let input = ''; process.stdin.on('data', d => { input += d; }).on('end', async (
     if (a.play) slots.get('flowPlay').on.click();
     if (a.wait) await sleep(a.wait);
   }
-  const out = Object.fromEntries([...slots].map(([k, e]) => [k, { text: text(e), hidden: e.hidden, attrs: e.attrs }]));
+  const out = Object.fromEntries([...slots].map(([k, e]) => [k, { text: text(e), hidden: e.hidden, attrs: e.attrs, dataset: e.dataset }]));
   out.tabState = Object.fromEntries(['savings', 'flow'].map(v => [v, { selected: tab(v).attrs['aria-selected'], tabIndex: tab(v).tabIndex }]));
   console.log(JSON.stringify(out));
   process.exit(0);  // a typical run may still have a timer queued
