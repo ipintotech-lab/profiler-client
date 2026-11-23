@@ -8,7 +8,7 @@
  * workflows first; a row opens that workflow's report from `data.reports` and a back button returns.
  * The host's buttons in `.tools`, and anything it appended to `root`, move along. render returns { show(workflow), overview() } to switch by code.
  *
- * Themes: report.css holds one set of variables per theme, picked by data-theme on <html>; static/theme.js sets it
+ * Themes: static/theme.css holds one set of variables per theme, picked by data-theme on <html>; static/theme.js sets it
  * and makes the toggle. This file stores nothing.
  */
 (function () {

@@ -258,7 +258,7 @@ def render_html(report: dict, title: str, restored: int | None = None, source: s
         meta.append(f"{shown:,} name{'' if shown == 1 else 's'} not matched, shown as pseudonyms")
     elif not restored:
         meta.append("no names restored, pseudonyms shown" if shown else "names shown as they were sent")
-    css = (STATIC / "report.css").read_text(encoding="utf-8")
+    css = (STATIC / "theme.css").read_text(encoding="utf-8") + (STATIC / "report.css").read_text(encoding="utf-8")
     js = (STATIC / "report.js").read_text(encoding="utf-8")
     theme = (STATIC / "theme.js").read_text(encoding="utf-8")
     return f"""<!doctype html>

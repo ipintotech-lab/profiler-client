@@ -15,7 +15,9 @@ from test_agent_flow import FLOW, _load, _plain, _render
 from profiler_client.report import render_html
 
 STATIC = Path(__file__).parent.parent / "src" / "profiler_client" / "static"
-CSS = (STATIC / "report.css").read_text(encoding="utf-8")
+TOKENS = (STATIC / "theme.css").read_text(encoding="utf-8")
+REPORT_CSS = (STATIC / "report.css").read_text(encoding="utf-8")
+CSS = TOKENS + REPORT_CSS
 THEME = (STATIC / "theme.js").read_text(encoding="utf-8")
 JS = (STATIC / "report.js").read_text(encoding="utf-8")
 
@@ -49,7 +51,7 @@ def test_both_themes_set_the_same_variables_and_print_is_the_light_one():
 
 def test_no_part_of_the_report_keeps_a_colour_of_its_own():
     # outside the two sets of variables, colours come from them: a new hex or rgba would miss one theme
-    rest = CSS[CSS.index(".sheet {\n  --paper"):]
+    rest = REPORT_CSS
     assert not re.findall(r"#[0-9a-fA-F]{3,8}\b|rgba?\(", rest)
     assert not re.findall(r"rgba?\(|#[0-9a-fA-F]{6}\b", JS)  # the live demo's tiles and canvas read the variables too
 
@@ -96,7 +98,7 @@ def test_the_header_says_pseudonyms_are_shown_only_when_a_name_is_one():
 
 def test_the_page_has_the_toggle_beside_print():
     page = render_html({}, "t")
-    assert THEME in page and "OpenlyTheme.init();" in page
+    assert THEME in page and TOKENS in page and page.index(TOKENS) < page.index(REPORT_CSS) and "OpenlyTheme.init();" in page
     assert page.index("OpenlyTheme.init();") < page.rindex("ProfilerReport.render(")  # themed before it is drawn
     assert "append(print, OpenlyTheme.toggle())" in page
 

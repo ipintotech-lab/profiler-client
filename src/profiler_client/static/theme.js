@@ -1,4 +1,4 @@
-/* The page's theme: light (blue on cream) or dark (the Openly7 wordmark's navy and indigo). report.css holds one
+/* The page's theme: light (blue on cream) or dark (the Openly7 wordmark's navy and indigo). theme.css holds one
  * set of variables per theme, picked by data-theme on <html>; a page that never loads this stays light.
  *
  * OpenlyTheme.init() sets data-theme from the reader's saved choice, else prefers-color-scheme (followed live while
@@ -8,7 +8,7 @@
  */
 (function () {
 'use strict';
-// ---- the theme: light (blue on cream) or dark (Openly7 navy and indigo), one set of variables each in report.css.
+// ---- the theme: light (blue on cream) or dark (Openly7 navy and indigo), one set of variables each in theme.css.
 // The reader's choice is kept in localStorage; without one the page follows prefers-color-scheme, live. Storage
 // can be missing or throw (a file:// page, a locked-down browser): the theme still works for the page's life.
 const THEME_KEY = 'openly7-theme', THEME_EVENT = 'openly7-theme';  // report.js listens for THEME_EVENT
