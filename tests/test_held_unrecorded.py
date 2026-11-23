@@ -2,7 +2,7 @@
 ``held_unrecorded``, agents_profiler #126): the report shows them as a line under the headline, beside
 "One answer away", so a run whose model outputs weren't recorded never reads as a bare 0%.
 
-The fixtures are real results of the server's overview job (agents_profiler 3b6a515) over the loan flow
+The fixtures are real results of the server's overview job (agents_profiler #132, 14a2939) over the loan flow
 (``generate_caseflows.py --format otel --tool-call-ids --specialist-llm --days 2 --scale 0.5``), prepared
 with --keep-names: ``full.json.gz`` as generated, ``stripped.json.gz`` with the message content removed
 from every span (what an exporter that records metadata only sends).
@@ -18,7 +18,8 @@ from test_savings import _render
 from profiler_client.report import view
 
 DATA = Path(__file__).parent / "data" / "held-unrecorded"
-HELD = "is held for review because model outputs weren't recorded; send traces that include them to confirm."
+HELD = ("is held for review because model outputs weren't recorded; traces that include them would confirm part "
+        "of it, often less.")
 
 
 def _load(name: str) -> dict:
@@ -58,7 +59,7 @@ def test_a_workflow_report_shows_its_own_held_line(results):
         assert slots["held"]["hidden"] is not shown, name
         if shown:
             assert "Held for review" in slots["held"]["text"]
-            assert "Another $" in slots["held"]["text"]
+            assert "Up to $" in slots["held"]["text"]
 
 
 def test_a_held_finding_gives_the_servers_reason_in_all_findings(results):
