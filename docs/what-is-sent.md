@@ -1,6 +1,6 @@
 # What the client can send
 
-A short list for the privacy notice. It covers profiler-client v0.39.0
+A short list for the privacy notice. It covers profiler-client v0.40.0
 (contract 2, policy 5). The code that decides it is
 [`policy.py`](../src/profiler_client/policy.py) for the clear-text words and
 [`contract.py`](../src/profiler_client/contract.py) for the event fields. The
