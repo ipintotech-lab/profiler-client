@@ -643,15 +643,46 @@ const RISK_TILES = [
 // findings that overlap one counted in the headline are listed, not counted again, so a tile can list more
 // findings than the headline counts; say how many it counts (older results have no counted figure)
 const inHeadline = t => t.counted == null || t.counted === t.count ? '' : `, ${t.counted ? count(t.counted) : 'none'} in the headline`;
-function renderRisks(q, totals, labels = {}) {
+// an empty tile says what its emptiness means, not just "0 findings". The server marks a finding high risk only
+// when a step's result changes for the same input, so no high-risk finding means no step did
+const EMPTY_TILE = {
+  low: () => 'None yet: every finding needs a check first. More runs, or steps declared read-only, can make one low risk.',
+  medium: () => 'None.',
+  high: runs => `Nothing to investigate: no step gave different results for the same input${runs ? ` in ${plural(runs, 'run')}` : ''}.`,
+};
+const INVESTIGATE_SHOWN = 5;
+// the steps behind the high-risk findings, one line each, so an engineer knows where to look
+function investigateList(found, many) {
+  const steps = new Map();
+  for (const { wf, f } of found) {
+    const step = (f.nodes || [])[0] ?? f.title, key = `${wf}\u0000${step}`;
+    if (!steps.has(key)) steps.set(key, { wf, step, n: 0, own: false });
+    const s = steps.get(key);
+    s.n++;
+    s.own ||= f.type === 'REVIEW_HIDDEN_STATE';
+  }
+  // the step whose own result changes first; a repeat that is only unsafe because results change elsewhere after
+  const all = [...steps.values()].sort((a, b) => b.own - a.own || b.n - a.n);
+  const line = s => `<li>${stepName(s.step)}${many ? ` <span class="k">· ${stepName(s.wf)}</span>` : ''}: ` +
+    `${s.own ? 'gives different results for the same input' : 'repeats a result, but results change for the same input elsewhere'}` +
+    `${s.n > 1 ? ` <span class="k">(${count(s.n)} findings)</span>` : ''}</li>`;
+  const more = all.length - INVESTIGATE_SHOWN;
+  return `<ul class="inv">${all.slice(0, INVESTIGATE_SHOWN).map(line).join('')}</ul>` +
+    (more > 0 ? `<p class="k">And ${plural(more, 'more step')}, in each workflow’s All findings.</p>` : '');
+}
+// found: [{ wf, f }] for every finding these totals count, to name the high-risk ones; runs: for the empty tiles
+function renderRisks(q, totals, labels = {}, { found = [], runs = 0 } = {}) {
   q('risks').hidden = !totals;
   if (!totals) return;
+  const high = found.filter(x => x.f.risk === 'high'), many = new Set(found.map(x => x.wf)).size > 1;
   q('risks').innerHTML = RISK_TILES.map(([risk, name, act]) => {
     const t = totals[risk] || { count: 0, saving: 0 };
+    const head = `<li class="tile" data-risk="${risk}"><h3>${esc(name || labels[risk] || risk)}</h3>` +
+      (name && labels[risk] ? `<p class="k">${esc(labels[risk])}</p>` : '');
+    if (!t.count) return `${head}<p class="empty">${esc(EMPTY_TILE[risk](runs))}</p></li>`;
     const figure = risk === 'high' ? '' : `<p class="fig">${t.saving ? `${money(t.saving)} <span class="k">in this dataset</span>` : 'No saving counted'}</p>`;
-    return `<li class="tile" data-risk="${risk}"><h3>${esc(name || labels[risk] || risk)}</h3>` +
-      (name && labels[risk] ? `<p class="k">${esc(labels[risk])}</p>` : '') +
-      `${figure}<p>${plural(t.count, 'finding')}${inHeadline(t)}</p>${t.count ? `<p class="k">${esc(act)}</p>` : ''}</li>`;
+    const list = risk === 'high' && high.length ? investigateList(high, many) : '';
+    return `${head}${figure}<p>${plural(t.count, 'finding')}${inHeadline(t)}</p>${list}<p class="k">${esc(act)}</p></li>`;
   }).join('');
 }
 
@@ -1197,7 +1228,8 @@ function renderReport(root, data, { name = '', meta = [], showEvent = null, decl
   };
   renderLead(q, data);
   markEstimate(q, costEstimated(data));
-  renderRisks(q, data.summary?.risk_totals, data.summary?.risk_labels);
+  renderRisks(q, data.summary?.risk_totals, data.summary?.risk_labels,
+    { found: (data.summary?.findings || []).map(f => ({ wf: '', f })), runs: data.summary?.totals?.runs });
   renderBetween(q, data);
   q('map').addEventListener('click', e => {
     const b = e.target.closest('button[data-map]');
@@ -1625,14 +1657,14 @@ const LIVE_VIEW = `
         <div class="lv-v lv-amber" data-r="liveReps">0</div>
         <svg class="lv-spark amber" data-r="liveSparkReps" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"></svg><div class="lv-c lv-dim">calls a rule, lookup or cache could take</div></div>
     </div>
-    <div class="lv-hhead"><span>Workflows · tint = share of spend that’s saveable</span><span>select a tile to chart it</span></div>
+    <div class="lv-hhead"><span>Workflows · tint = share of spend that’s saveable · ▲▼ = its last call’s cost against the one before</span><span>select a tile to chart it</span></div>
     <div class="lv-heat" data-r="liveHeat"></div>
     <div class="lv-grid">
-      <div class="lv-panel"><h3><span data-r="liveChartTitle">All workflows · spend per minute</span><span>1-minute candles</span></h3>
-        <canvas class="lv-canvas" data-r="liveChart" aria-label="Candlesticks of spend per minute, with the saveable part as a line"></canvas></div>
+      <div class="lv-panel"><h3><span data-r="liveChartTitle">All workflows · spend per minute</span><span>1 candle = 1 simulated minute</span></h3>
+        <canvas class="lv-canvas" data-r="liveChart" aria-label="Candles of spend per simulated minute, red when a minute cost more than the one before and green when it cost less, with the saveable part of each minute as a blue line"></canvas></div>
       <div class="lv-panel"><h3><span>Call tape</span><span>saveable in blue</span></h3><ul class="lv-tape" data-r="liveTape"></ul></div>
     </div>
-    <div class="lv-foot"><span><span class="lv-up">▲ red</span>: cost per call rising</span><span><span class="lv-down">▼ green</span>: falling</span><span><span class="lv-save">■ blue</span>: saveable</span></div>
+    <div class="lv-foot"><span><span class="lv-up">▲ Red candle</span>: this minute cost more than the one before</span><span><span class="lv-down">▼ Green candle</span>: it cost less</span><span><span class="lv-save">■ Blue line</span>: the part of each minute’s spend that could be saved</span></div>
   </div>`;
 
 // a seeded generator (xorshift32), so a run of the demo, and its tests, can be repeated exactly
@@ -1829,6 +1861,7 @@ const OVERVIEW = HEAD + FLOW_TABS + `
       <div class="sv-stack" data-r="svStack" role="img"></div>
       <p class="sv-legend" data-r="svLegend"></p>
       <p class="why" data-r="svInvestigate" hidden></p>
+      <p class="why sv-wait" data-r="svWaiting" hidden></p>
     </div>
     <div class="sv-card sv-proj" data-r="svProj">
       <label for="sv-runs">Your runs per month</label>
@@ -1854,7 +1887,7 @@ const OVERVIEW = HEAD + FLOW_TABS + `
     </table>
     <p class="why">Each call belongs to one workflow, so the rows add up to the total above.</p>
   </section>
-  <details class="sv-more">
+  <details class="sv-more" open>
     <summary>Details for engineers</summary>
     <ul class="risks" data-r="risks" hidden aria-label="Findings by risk"></ul>
     <p class="totals" data-r="totals"></p>
@@ -1886,10 +1919,22 @@ const TOP_ACTIONS = 3, ALSO_SHOWN = 2;
 function savingsModel(data) {
   const o = data.overview || {}, t = o.totals || {}, rt = o.risk_totals;
   const runs = (o.workflows || []).reduce((n, r) => n + (r.runs || 0), 0);
-  const groups = new Map(), also = [];
+  const groups = new Map(), also = [], waiting = new Map();
   for (const [wf, rep] of Object.entries(data.reports || {})) {
-    for (const f of rep?.summary?.findings || []) {
+    const fs = rep?.summary?.findings || [];
+    const countedSteps = new Set(fs.filter(f => f.counted).flatMap(f => f.nodes || []));
+    for (const f of fs) {
       if (!f.saving) continue;
+      // held out only until its step is declared read-only, on steps no counted finding touches: a counted rule
+      // on the same step may already save these calls (covered_by misses one that saves less), so only there is
+      // the saving what one answer adds. A high-risk one needs its cause found first, so it isn't offered here
+      if (!f.counted && f.held_out === 'declaration' && f.covered_by == null && f.risk !== 'high' &&
+          !(f.nodes || []).some(n => countedSteps.has(n))) {
+        const step = (f.nodes || [])[0] ?? f.title, key = `${wf} ${step}`;
+        if (!waiting.has(key)) waiting.set(key, { wf, step, saving: 0 });
+        waiting.get(key).saving += f.saving;
+        continue;
+      }
       // not counted because other findings already count its calls: shown, never added
       if (!f.counted) { if (f.covered_by != null || f.held_out === 'overlap') also.push({ wf, f }); continue; }
       const at = LLM_AT.exec(f.title || '');
@@ -1908,6 +1953,7 @@ function savingsModel(data) {
   const actions = [...groups.values()].sort((a, b) => rank(a.risk) - rank(b.risk) || b.saving - a.saving || a.wf.localeCompare(b.wf));
   also.sort((a, b) => b.f.saving - a.f.saving);
   return { spend: t.spend || 0, saved: t.replaceable || 0, runs, actions, also,
+           waiting: [...waiting.values()].sort((a, b) => b.saving - a.saving),
            tiers: rt ? { ready: rt.low?.saving || 0, review: rt.medium?.saving || 0, investigate: rt.high?.count || 0 } : null };
 }
 
@@ -1996,9 +2042,23 @@ function renderProjection(q, m, n) {
   q('svOutReady').textContent = m.tiers ? `could be saved · ${p.usd(p.rnd(ready))} of it ready now` : 'could be saved';
 }
 
+// savings one answer would add: steps whose repeats count once someone says they only read. "Up to": the
+// analysis picks again once they're declared, so it may keep less than the sum
+function renderWaiting(q, m) {
+  const total = m.waiting.reduce((n, w) => n + w.saving, 0), many = new Set(m.waiting.map(w => w.wf)).size > 1;
+  q('svWaiting').hidden = !m.spend || !total;
+  if (q('svWaiting').hidden) { q('svWaiting').innerHTML = ''; return; }
+  const steps = m.waiting.map(w => `${stepName(w.step)}${many ? ` (${stepName(w.wf)})` : ''}`);
+  const one = m.waiting.length === 1;
+  q('svWaiting').innerHTML = `<span class="pill review">One answer away</span> <b>Up to ${money(total)} more</b> if ` +
+    `${one ? 'this step only reads' : `these ${count(m.waiting.length)} steps only read`}: ${andList(steps)}. ` +
+    `${one ? 'It isn’t' : 'They aren’t'} counted above until you declare ${one ? 'it' : 'them'} read-only (Tell us about the agent), then analyze again.`;
+}
+
 function renderSavings(q, data) {
   const m = savingsModel(data);
   renderSavingsHead(q, m);
+  renderWaiting(q, m);
   const runs = q('svRuns');
   const update = () => renderProjection(q, m, Math.max(0, +runs.value || 0));
   runs.addEventListener('input', update);
@@ -2044,8 +2104,9 @@ function renderOverview(root, data, { name = '', meta = [], showEvent = null, de
       q('svEstimate').hidden = false;
       q('svEstimate').textContent = ESTIMATED + (unpriced ? ` ${plural(unpriced, 'call')} ${unpriced === 1 ? 'has' : 'have'} no price, so the spend leaves ${unpriced === 1 ? 'it' : 'them'} out.` : '');
     }
-    renderRisks(q, o.risk_totals, o.risk_labels);
     const runs = (o.workflows || []).reduce((n, r) => n + (r.runs || 0), 0);
+    const found = Object.entries(data.reports || {}).flatMap(([wf, r]) => (r?.summary?.findings || []).map(f => ({ wf, f })));
+    renderRisks(q, o.risk_totals, o.risk_labels, { found, runs });
     q('totals').innerHTML = `${money(o.totals?.spend)} <span class="k">across</span> ${plural(runs, 'run')} <span class="k">in</span> ${plural((o.workflows || []).length, 'workflow')}.`;
     renderOverviewRows(q, o, data.reports);
     const flow = renderFlow(q, data);

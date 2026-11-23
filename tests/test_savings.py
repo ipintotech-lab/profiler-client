@@ -306,3 +306,82 @@ def test_view_keeps_what_marks_an_estimated_cost(fixture):
     slots = _render(view(report))["slots"]
     assert not slots["svEstimate"]["hidden"]
     assert "7 calls have no price" in _text(slots["svEstimate"])
+
+
+def test_details_for_engineers_start_open():
+    # the risk tiles and totals are shown without a click; the summary still folds them away
+    source = JS.read_text(encoding="utf-8")
+    assert re.search(r'<details class="sv-more" open>\s*<summary>Details for engineers</summary>', source)
+
+
+# --- risk tiles: what an empty one means, and where to investigate -------------------------------
+
+def test_an_empty_risk_tile_says_what_that_means():
+    # the loan day has no low-risk and no high-risk finding: say so, not "0 findings"
+    from test_agent_flow import FLOW, _load
+    tiles = _text(_render(_load(FLOW))["slots"]["risks"])
+    assert "Nothing to investigate: no step gave different results for the same input in 16 runs." in tiles
+    assert "None yet: every finding needs a check first." in tiles
+    assert "0 findings" not in tiles and "Find the cause" not in tiles
+
+
+def test_investigate_first_names_the_steps_to_look_at(fixture, page):
+    report, names = fixture
+    data = translate(report, names["names"], set(), set())
+    steps = {}
+    for wf, r in data["reports"].items():
+        for f in r["summary"]["findings"]:
+            if f["risk"] == "high":
+                s = steps.setdefault((wf, f["nodes"][0]), {"n": 0, "own": False})
+                s["n"] += 1
+                s["own"] |= f["type"] == "REVIEW_HIDDEN_STATE"
+    ranked = sorted(steps.items(), key=lambda kv: (-kv[1]["own"], -kv[1]["n"]))
+    tiles = _text(page["risks"])
+    high = tiles[tiles.index("Investigate first"):]
+    assert f"{sum(s['n'] for s in steps.values())} findings, none in the headline" in high
+    for (wf, step), s in ranked[:5]:
+        said = "gives different results for the same input" if s["own"] else "results change for the same input elsewhere"
+        assert f"{step} · {wf}: {said}" in high, step
+    assert f"And {len(ranked) - 5} more step" in high and "Find the cause before changing this step." in high
+
+
+# --- savings one answer away ---------------------------------------------------------------------
+
+def _held(step, saving, **kw):
+    return {"type": "CACHE_RESULT", "title": step, "nodes": [step], "action": "Reuse the first result", "saving": saving,
+            "observations": 12, "risk": "medium", "risk_reasons": [], "counted": False, "held_out": "declaration",
+            "covered_by": None, **kw}
+
+
+def test_savings_one_answer_away_are_offered_only_where_they_add(fixture):
+    report, names = fixture
+    data = view(translate(report, names["names"], set(), set()))
+    # every waiting saving in this dataset sits on a step a counted rule already saves: nothing to offer
+    assert _render(data)["slots"]["svWaiting"]["hidden"]
+    findings = next(r["summary"]["findings"] for r in data["reports"].values() if any(f["counted"] for f in r["summary"]["findings"]))
+    counted_step = next(f for f in findings if f["counted"])["nodes"][0]
+    findings += [_held("get_price", 0.5), _held("get_price", 0.25),
+                 _held("covered", 9.0, covered_by=0), _held("unstable", 9.0, risk="high"),
+                 _held(counted_step, 9.0), _held("needs_review", 9.0, held_out="needs_review")]
+    line = _text(_render(data)["slots"]["svWaiting"])
+    assert "Up to $0.750 more if this step only reads: get_price." in line
+    assert "declare it read-only" in line and "$9" not in line
+
+
+def test_the_live_chart_says_what_its_colors_mean():
+    source = JS.read_text(encoding="utf-8")
+    assert "this minute cost more than the one before" in source and "the part of each minute’s spend that could be saved" in source
+    assert "1 candle = 1 simulated minute" in source and "its last call’s cost against the one before" in source
+    assert "cost per call rising" not in source
+
+
+def test_investigate_lists_steps_whose_own_results_change_before_unsafe_repeats(fixture):
+    # a repeat that's only unsafe because results change elsewhere comes after every step that changes its own,
+    # however many findings it has
+    report, names = fixture
+    data = view(translate(report, names["names"], set(), set()))
+    findings = next(iter(data["reports"].values()))["summary"]["findings"]
+    findings += [_held("lookup_rates", 0.1, risk="high") for _ in range(9)]
+    high = _text(_render(data)["slots"]["risks"]).split("Investigate first")[1]
+    assert "lookup_rates" not in high.split("analyze_remediation")[0]
+    assert "classify_ticket" in high.split("analyze_remediation")[0]
