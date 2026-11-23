@@ -19,6 +19,7 @@
   --mono: "Spline Sans Mono", ui-monospace, Menlo, Consolas, monospace;
   color: var(--ink); font-family: var(--sans); font-size: 16px; line-height: 1.55;
   background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; padding: 28px 32px 32px;
+  container: sheet / inline-size;  /* the flow and the live demo stack by the report's width, not the window's */
 }
 .sheet *, .sheet *::before, .sheet *::after { box-sizing: border-box; }
 .sheet h2, .sheet h3, .sheet p, .sheet ul, .sheet dl, .sheet dd { margin: 0; padding: 0; }
@@ -378,7 +379,7 @@
 /* the diagram sets the row's height; the remarks scroll beside it instead of stretching the diagram's panel */
 .sheet .fl-side { position: relative; min-height: 320px; padding: 0; }
 .sheet .fl-sidein { position: absolute; inset: 0; overflow-y: auto; padding: 12px; }
-@media (max-width: 960px) {
+@container sheet (max-width: 960px) {  /* the report's own width: a host may give it a narrow column */
   .sheet .fl-grid { grid-template-columns: 1fr; }
   .sheet .fl-side { min-height: 0; }
   .sheet .fl-sidein { position: static; overflow: visible; }
@@ -474,7 +475,7 @@
 .sheet .lv-big .lv-dim { font-size: 11px; font-weight: 500; }
 .sheet .lv-tile .lv-spark { height: 22px; }
 .sheet .lv-grid { display: grid; grid-template-columns: 1.55fr 1fr; }
-@media (max-width: 900px) { .sheet .lv-grid { grid-template-columns: 1fr; } .sheet .lv-grid > .lv-panel { border-right: 0; } .sheet .lv-grid > .lv-panel + .lv-panel { border-top: 1px solid var(--lv-line); } }
+@container sheet (max-width: 900px) { .sheet .lv-grid { grid-template-columns: 1fr; } .sheet .lv-grid > .lv-panel { border-right: 0; } .sheet .lv-grid > .lv-panel + .lv-panel { border-top: 1px solid var(--lv-line); } }
 .sheet .lv-panel { padding: 12px 14px; border-right: 1px solid var(--lv-line); min-width: 0; }
 .sheet .lv-grid > .lv-panel:last-child { border-right: 0; }
 .sheet .lv-panel h3 { display: flex; justify-content: space-between; gap: 8px; font: 600 11px var(--sans); color: var(--lv-dim); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 8px; }
