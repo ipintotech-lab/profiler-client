@@ -347,7 +347,8 @@ def _forget(args: argparse.Namespace) -> int:
 
 def _app(args: argparse.Namespace) -> int:
     from .app import serve  # the HTTP modules load only for this command
-    serve(args.server, port=args.port, open_browser=not args.no_browser)
+    prices = token_prices.parse(None, args.prices_file)  # a bad file stops here, before the page opens
+    serve(args.server, port=args.port, open_browser=not args.no_browser, prices=prices)
     return 0
 
 
@@ -458,6 +459,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--server", default=DEFAULT_SERVER, help=f"the Openly7 site to send to (default {DEFAULT_SERVER})")
     ap.add_argument("--port", type=int, default=0, help="port on 127.0.0.1 (default: any free one)")
     ap.add_argument("--no-browser", action="store_true", help="print the page's address instead of opening it")
+    ap.add_argument("--prices-file", metavar="FILE",
+                    help='JSON prices per model to cost calls whose traces have no cost, e.g. '
+                         '{"gpt-5": [1.25, 10], "*": [3, 15]}; "*" is every other model. The page then asks for none')
     ap.set_defaults(run=_app)
     sub.add_parser("version", help="print client, contract and policy versions").set_defaults(run=_version)
 

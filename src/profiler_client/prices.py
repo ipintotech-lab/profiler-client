@@ -17,6 +17,10 @@ from pathlib import Path
 
 ALL = "*"
 MAX_PRICE = 1e6
+# the server's limits on a job's token_prices (profiler.data_quality), so a
+# price the server would refuse is refused here first
+MAX_MODEL_NAME = 200
+MAX_PRICED_MODELS = 200
 FORMAT = "IN,OUT or MODEL=IN,OUT in $ per 1M input and output tokens"
 
 Prices = dict[str, tuple[float, float]]
@@ -26,6 +30,8 @@ def _pair(value, where: str) -> tuple[float, float]:
     if isinstance(value, str):
         value = value.split(",")
     try:
+        if any(isinstance(x, bool) for x in value):  # JSON true/false is not a price
+            raise TypeError
         given, out = (float(x) for x in value)
     except (TypeError, ValueError):
         raise ValueError(f"{where}: give two prices, {FORMAT}") from None
@@ -50,6 +56,10 @@ def parse(values: list[str] | None = None, file: str | Path | None = None) -> Pr
     for value in values or []:
         model, _, pair = value.rpartition("=")
         prices[model.strip() or ALL] = _pair(pair, f"--prices {value}")
+    if any(not model or len(model) > MAX_MODEL_NAME for model in prices):
+        raise ValueError(f"a model name in the prices is empty or over {MAX_MODEL_NAME} characters")
+    if len(prices) > MAX_PRICED_MODELS:
+        raise ValueError(f"the prices list over {MAX_PRICED_MODELS} models")
     return prices or None
 
 

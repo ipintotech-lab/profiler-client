@@ -1,6 +1,6 @@
 # What the client can send
 
-A short list for the privacy notice. It covers profiler-client v0.39.0
+A short list for the privacy notice. It covers profiler-client v0.40.0
 (contract 2, policy 5). The code that decides it is
 [`policy.py`](../src/profiler_client/policy.py) for the clear-text words and
 [`contract.py`](../src/profiler_client/contract.py) for the event fields. The
@@ -38,7 +38,9 @@ equal.
 
 - the `events.jsonl` above;
 - the client token (`pc_…`) you paste in, as the `Authorization` header. It is held in the app's memory and never saved;
-- the analysis settings: the kind of report and, if you give them, the two token prices;
+- the analysis settings: the kind of report and, if you give them, the two token prices, or with
+  `--prices-file` the prices per model, keyed by the model names the dataset carries (pseudonyms for
+  models outside the public list);
 - a random `Idempotency-Key` per request, so a retried request doesn't run twice.
 
 It downloads the report. The report holds pseudonyms only; the app restores

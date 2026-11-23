@@ -14,7 +14,7 @@ Python 3.10 or later; the only dependency is pydantic. Install a release from
 GitHub and check the version:
 
 ```
-pip install https://github.com/ipintotech-lab/profiler-client/archive/refs/tags/v0.39.0.tar.gz
+pip install https://github.com/ipintotech-lab/profiler-client/archive/refs/tags/v0.40.0.tar.gz
 profiler-client --version
 ```
 
@@ -52,8 +52,9 @@ preparing, and everything else is deleted when the app exits (Ctrl-C). An
 app that is interrupted, for example killed, or on Windows ended by a sign-out
 or shutdown, can leave the folder behind; deleting it at the next start is
 planned ([#58](https://github.com/ipintotech-lab/profiler-client/issues/58)).
-`--server` picks another Openly7 address, `--port` a fixed port and
-`--no-browser` just prints the address.
+`--server` picks another Openly7 address, `--port` a fixed port,
+`--no-browser` just prints the address and `--prices-file` gives prices per
+model, as for `check`, instead of the page's two price boxes.
 
 `check` reads your raw traces in memory and prints the grade the server will
 give them, which findings the analysis can make from them (and which it

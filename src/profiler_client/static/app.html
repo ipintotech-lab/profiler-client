@@ -59,7 +59,7 @@ replaced by pseudonyms, is sent to Openly7. The report comes back here and is sh
     <label>$ per 1M input tokens <input type="number" id="priceIn" min="0" step="any"></label>
     <label>$ per 1M output tokens <input type="number" id="priceOut" min="0" step="any"></label>
   </div>
-  <p class="note">Optional: prices to cost model calls whose traces have no cost.</p>
+  <p class="note" id="pricesNote">Optional: prices to cost model calls whose traces have no cost.</p>
   <button type="button" id="submit" disabled>Send to Openly7</button>
   <p id="progress" role="status"></p>
   <p class="error" id="sendError" role="alert"></p>
@@ -103,6 +103,10 @@ replaced by pseudonyms, is sent to Openly7. The report comes back here and is sh
       const out = await call('POST', '/api/prepare', { keep_names: $('keepNames').checked, llm_inputs: $('llmInputs').checked });
       say('summary', `Prepared ${out.sessions.toLocaleString()} session(s), ${out.events.toLocaleString()} events` +
           (out.kept_names.length ? `; names sent as they are: ${out.kept_names.join(', ')}` : '; names sent as pseudonyms') + '.');
+      if (out.prices_file) {
+        document.querySelector('.prices').hidden = true;
+        $('pricesNote').textContent = `Prices from --prices-file for: ${out.prices_file.join(', ')}.`;
+      }
       $('check').textContent = out.check;
       $('check').hidden = false;
       $('send').setAttribute('aria-disabled', 'false');

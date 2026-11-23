@@ -32,8 +32,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from pathlib import Path
 
+from . import prices as token_prices
 from .cli import parse_report, prepare_check, prepare_dataset, report_title, restore_names
 from .dataset import EVENTS, PrepareError
+from .names import Names
+from .pseudonym import Pseudonymizer, new_key
 from .report import render_html
 
 COOKIE = "pc_session"
@@ -110,7 +113,7 @@ class Openly7:
                                           idempotent=True))["files"]
         return stored
 
-    def start_overview(self, file_id: str, prices: list[float] | None) -> dict:
+    def start_overview(self, file_id: str, prices: list[float] | dict[str, list[float]] | None) -> dict:
         params: dict = {"kind": "overview"}
         if prices:
             params["token_prices"] = prices
@@ -140,9 +143,11 @@ class Session:
     """What one run of the app holds: the files chosen, the dataset made
     from them, the job and the report. One user, so one lock."""
 
-    def __init__(self, workdir: Path, origin: str) -> None:
+    def __init__(self, workdir: Path, origin: str, prices: token_prices.Prices | None = None) -> None:
         self.lock = threading.Lock()
         self.workdir, self.origin = workdir, origin
+        self.prices = prices  # from --prices-file, as the trace names the models
+        self.prices_param: list[float] | dict[str, list[float]] | None = None  # as the dataset names them
         self.raw = workdir / "raw"
         self.raw_bytes = 0
         self.datasets = 0
@@ -178,17 +183,26 @@ class Session:
             raise ValueError("choose at least one trace file")
         self.datasets += 1
         output = self.workdir / f"dataset-{self.datasets}"
+        key = new_key() if self.prices else None  # held only to name the priced models as this dataset does
+        options = {"key": key} if key else {}
         try:
-            manifest, events = prepare_dataset(paths, output, keep_names=keep_names, llm_inputs=llm_inputs)
+            manifest, events = prepare_dataset(paths, output, keep_names=keep_names, llm_inputs=llm_inputs, **options)
         finally:
             self.clear_raw()
         self.dataset, self.job_id, self.report_json, self.report_html = output / EVENTS, None, None, None
+        if self.prices:  # a model outside the public vocabulary is a pseudonym in the events, so its price is too
+            self.prices_param = token_prices.as_param(token_prices.keyed(self.prices, Names(Pseudonymizer(key)).model))
         return {"check": prepare_check(manifest, events, len(paths)), "events": manifest["events"],
-                "sessions": manifest["sessions"], "kept_names": manifest["kept_names"]}
+                "sessions": manifest["sessions"], "kept_names": manifest["kept_names"],
+                "prices_file": sorted(self.prices) if self.prices else None}
 
     def submit(self, token: str, prices: list[float] | None) -> dict:
         if self.dataset is None:
             raise ValueError("prepare the files first")
+        if self.prices:
+            if prices is not None:
+                raise ValueError("the prices come from --prices-file; leave the two price boxes empty")
+            prices = self.prices_param
         if not CLIENT_TOKEN.fullmatch(token):
             raise ValueError("a client token starts with pc_; make one on the Openly7 site")
         self.remote = Openly7(self.origin, token)
@@ -384,7 +398,7 @@ def delete_on_console_close(workdir: Path):
     return handler
 
 
-def serve(server: str, port: int = 0, open_browser: bool = True) -> None:
+def serve(server: str, port: int = 0, open_browser: bool = True, prices: token_prices.Prices | None = None) -> None:
     origin = server_origin(server)
     signal.signal(signal.SIGTERM, _stop)
     if hasattr(signal, "SIGBREAK"):  # Windows: Ctrl-Break
@@ -392,7 +406,7 @@ def serve(server: str, port: int = 0, open_browser: bool = True) -> None:
     workdir = Path(tempfile.mkdtemp(prefix="profiler-client-app-"))  # mode 0700
     _on_close = delete_on_console_close(workdir) if os.name == "nt" else None  # kept alive while serving
     try:
-        httpd = AppServer(port, Session(workdir, origin))
+        httpd = AppServer(port, Session(workdir, origin, prices))
         print(f"profiler-client app, sending to {origin}\n\n  {httpd.url}\n\n"
               "Open that address in your browser. Ctrl-C stops the app and deletes the files it copied.", flush=True)
         if open_browser:

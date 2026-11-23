@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from profiler_client import prices
@@ -38,6 +40,21 @@ def test_no_prices_given_is_none():
 def test_bad_prices_are_refused(value):
     with pytest.raises(ValueError):
         prices.parse([value])
+
+
+@pytest.mark.parametrize("text", ['{"": [1, 2]}', '{"gpt-5": [true, 2]}', json.dumps({"m" * 201: [1, 2]}),
+                                  json.dumps({f"m{i}": [1, 2] for i in range(201)}), "[]", "{}"])
+def test_a_prices_file_the_server_would_refuse_is_refused(tmp_path, text):
+    f = tmp_path / "p.json"
+    f.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError):
+        prices.parse(None, f)
+
+
+def test_a_prices_file_at_the_server_limits_is_taken(tmp_path):
+    f = tmp_path / "p.json"
+    f.write_text(json.dumps({f"{i:0200d}": [0, 1e6] for i in range(200)}), encoding="utf-8")
+    assert len(prices.parse(None, f)) == 200
 
 
 class _E:
