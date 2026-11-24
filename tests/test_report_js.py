@@ -431,8 +431,47 @@ def test_an_estimated_cost_is_marked_under_the_headline():
                          "totals": {"cost": 10.0}}
     assert "estimated" not in _render(report)["sub"]
     sub = _render({**report, "data_quality": _ESTIMATED})["sub"]
-    assert "$3.50 of $10.00" in sub
+    assert _words(sub).startswith("$3.50 candidate of $10.00 estimated in this dataset")
     assert '<span class="estimated">Cost estimated from tokens at your prices' in sub
+
+
+def _words(html: str) -> str:
+    return re.sub(r"<[^>]+>", "", html)
+
+
+LABEL = re.compile(r'(\$[\d.,]+)(?:</b>)? <span class="mkind" data-kind="(\w+)">\2</span>')
+
+
+def _labels(html: str) -> list[tuple[str, str]]:
+    return LABEL.findall(html)
+
+
+def test_each_header_money_figure_says_measured_or_candidate():
+    """The spend is "measured" (recorded in the traces), the share a rule could replace is "candidate",
+    in the headline, the line under it, the totals and the risk tiles; a key line says what each word means."""
+    report = _report()
+    report["summary"].update(replaceable={"cost": 3.5, "findings": 2}, risk_totals=RISKS, risk_labels=LABELS)
+    page = _render(report)
+    assert _labels(page["sub"]) == [("$3.50", "candidate"), ("$10.00", "measured")]  # a small sum: share in the head
+    assert _labels(page["totals"])[0] == ("$10.00", "measured")
+    tiles = _labels(page["risks"])
+    assert tiles and {k for _, k in tiles} == {"candidate"}
+    assert "measured the cost recorded in your traces" in _words(page["moneyKey"])
+    assert "candidate a cost a rule could replace" in _words(page["moneyKey"])
+    # $50 and up leads with the sum; the numbers are the ones shown before the labels
+    report["summary"].update(replaceable={"cost": 60.0, "findings": 2}, totals={"cost": 200.0, "runs": 3})
+    head = _render(report)["head"]
+    assert _labels(head) == [("$60.00", "candidate"), ("$200.00", "measured")]
+    assert _words(LABEL.sub(r"\1", head)).startswith("$60.00 of the $200.00 this workflow cost")
+
+
+def test_an_estimated_spend_is_labelled_estimated_not_measured():
+    report = _report()
+    report["summary"].update(replaceable={"cost": 3.5, "findings": 2})
+    page = _render({**report, "data_quality": _ESTIMATED})
+    kinds = {k for _, k in _labels(page["sub"] + page["totals"])}
+    assert kinds == {"candidate", "estimated"}
+    assert "worked out from tokens" in _words(page["moneyKey"])
 
 
 def test_the_overview_is_marked_when_any_workflows_cost_is_estimated():
