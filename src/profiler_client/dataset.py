@@ -36,6 +36,7 @@ from .events import convert_event_log, is_event_log
 from .lint import check_event
 from .names import KEEPABLE, Names
 from .otel import convert_otel_export, is_otel_export
+from .pseudonym import TOKEN
 
 KEY_ID = re.compile(r"[0-9a-f]{16}")
 
@@ -296,4 +297,36 @@ def summary(events: list[dict]) -> dict:
         "event_types": dict(Counter(e["event_type"] for e in events)),
         "top_nodes": Counter(e["node"] for e in events).most_common(15),
         "cost": round(sum(e.get("cost", 0.0) for e in events), 6),
+    }
+
+
+def what_is_sent(payload: bytes) -> dict:
+    """The send screen's tiles, counted from ``events.jsonl``'s bytes as they
+    will be sent: fields the lint finds that may carry text (prompts, replies,
+    code), the names in clear text (the seal's list), the distinct pseudonyms,
+    the events, and the LLM calls that carry a fingerprint."""
+    seal, events = read_sealed(payload)
+    kept = frozenset(seal["kept_names"])
+    pseudonyms: set[str] = set()
+
+    def collect(value) -> None:
+        if isinstance(value, str):
+            pseudonyms.update(TOKEN.findall(value))
+        elif isinstance(value, dict):
+            for k, v in value.items():
+                collect(k)
+                collect(v)
+        elif isinstance(value, list):
+            for v in value:
+                collect(v)
+
+    for event in events:
+        collect(event)
+    return {
+        "text_fields": sum(len(check_event(e, kept)) for e in events),
+        "clear_names": seal["kept_names"],
+        "pseudonyms": len(pseudonyms),
+        "events": seal["events"],
+        "fingerprints": sum(1 for e in events if e["event_type"] == "decision"
+                            and isinstance(e.get("input_state"), dict) and "input" in e["input_state"]),
     }

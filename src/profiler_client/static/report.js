@@ -517,6 +517,7 @@ const SHEET = HEAD + `
   <div class="lead" data-r="lead" hidden>
     <p class="head" data-r="head"></p>
     <p class="sub" data-r="sub"></p>
+    <p class="why sv-wait" data-r="held" hidden></p>
     <p class="why mkey" data-r="moneyKey"></p>
   </div>
   <ul class="risks" data-r="risks" hidden aria-label="Findings by risk"></ul>
@@ -630,6 +631,7 @@ function renderLead(q, data) {
   const r = data.summary?.replaceable, cost = data.summary?.totals?.cost || 0, spent = spendKind([data]);
   q('lead').hidden = !r;
   if (!r) return;
+  renderHeld(q('held'), data.summary?.held_unrecorded);
   renderMoneyKey(q, spent);
   q('moneyKey').hidden = !cost;
   const what = 'a rule, a script or a cache could replace';
@@ -647,6 +649,13 @@ function renderLead(q, data) {
     q('head').innerHTML = `<b>${share(r.cost, cost)}</b> of this workflow’s spend went to calls ${what}.`;
     q('sub').innerHTML = `${money(r.cost)}${kind('candidate')} of ${money(cost)}${kind(spent)} in this dataset, ${esc(found)}.`;
   }
+}
+
+// savings held out of the headline because the trace didn't record what the model chose (the server's
+// held_unrecorded): shown beside it, so a run that records no model output never reads as a bare 0%
+function renderHeld(el, held) {
+  el.hidden = !held?.text;
+  el.innerHTML = held?.text ? `<span class="pill review">Held for review</span> ${esc(held.text)}` : '';
 }
 
 // three tiles under the headline, one per risk, each with its label in text (never color alone). The
@@ -724,7 +733,15 @@ const HELD = {
   overlap: 'Not in the headline: a larger finding already counts these calls.',
   no_saving: 'No saving counted.',
   needs_review: 'Not in the headline: needs review. The model still answers the calls the rule doesn’t cover.',
+  unrecorded: 'Not in the headline: what the model chose wasn’t recorded; send traces that include model outputs to confirm.',
 };
+// the server's reason for holding a finding whose model choice wasn't recorded, by finding type
+const HELD_UNRECORDED = {
+  CONDITIONAL_LLM_BYPASS: 'What the model chose here wasn\'t recorded; send traces that include its output to confirm.',
+  EXTRACT_DETERMINISTIC_SUBSTEP: 'Some steps between these weren\'t recorded in full; send traces that include model inputs and outputs to confirm.',
+};
+const heldWhy = r => r.held_out === 'unrecorded' && HELD_UNRECORDED[r.type]
+  ? `Not in the headline: ${HELD_UNRECORDED[r.type]}` : HELD[r.held_out] || '';
 function renderAll(q, data, showAll, declare, open = new Set()) {
   const rows = data.summary?.findings, labels = data.summary?.risk_labels || {};
   q('allSection').hidden = !Array.isArray(rows) || !rows.length;
@@ -735,7 +752,7 @@ function renderAll(q, data, showAll, declare, open = new Set()) {
   const top = [...rows.filter(r => r.counted), ...rows.filter(r => !r.counted && parentOf(r) === null)];
   const shown = showAll ? top : top.slice(0, ALL_SHOWN);
   // held out until its step is declared read-only: the question, and the host's button or how to answer it
-  const why = r => r.counted ? '' : parentOf(r) !== null ? esc(HELD.overlap) : r.held_out !== 'declaration' ? esc(HELD[r.held_out] || '')
+  const why = r => r.counted ? '' : parentOf(r) !== null ? esc(HELD.overlap) : r.held_out !== 'declaration' ? esc(heldWhy(r))
     : `<b>Does this step only read?</b> ${declare ? `<button type="button" class="btn-map" data-declare="${rows.indexOf(r)}">Declare it read-only</button>`
       : 'Not in the headline until you say so: declare it read-only (Tell us about the agent), then analyze again.'}`;
   const tr = (r, sub) =>
@@ -1888,6 +1905,7 @@ const OVERVIEW = HEAD + FLOW_TABS + `
       <p class="sv-legend" data-r="svLegend"></p>
       <p class="why" data-r="svInvestigate" hidden></p>
       <p class="why sv-wait" data-r="svWaiting" hidden></p>
+      <p class="why sv-wait" data-r="svHeld" hidden></p>
     </div>
     <div class="sv-card sv-proj" data-r="svProj">
       <label for="sv-runs">Your runs per month</label>
@@ -2087,6 +2105,7 @@ function renderSavings(q, data) {
   const m = savingsModel(data);
   renderSavingsHead(q, m, spendKind(Object.values(data.reports || {})));
   renderWaiting(q, m);
+  renderHeld(q('svHeld'), data.overview?.held_unrecorded);
   const runs = q('svRuns');
   const update = () => renderProjection(q, m, Math.max(0, +runs.value || 0));
   runs.addEventListener('input', update);

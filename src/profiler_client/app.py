@@ -34,7 +34,7 @@ from pathlib import Path
 from . import prices as token_prices
 from . import workdirs
 from .cli import parse_report, prepare_check, prepare_dataset, report_title, restore_names
-from .dataset import EVENTS, PrepareError
+from .dataset import EVENTS, PrepareError, what_is_sent
 from .names import Names
 from .pseudonym import Pseudonymizer, new_key
 from .report import render_html
@@ -47,6 +47,19 @@ MAX_JSON_BYTES = 64 * 1024
 MAX_DISCARD_BYTES = 1024 * 1024
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 CLIENT_TOKEN = re.compile(r"pc_[A-Za-z0-9_-]{1,200}")
+
+
+def trust_line(keep_names: bool = False, fingerprint: bool = False) -> str:
+    """What leaves this machine, in one sentence, from docs/what-is-sent.md.
+    With both options off it is the sentence the Openly7 landing page shows."""
+    sent = ["numbers", "the order of calls", "public names such as model ids"]
+    if keep_names:
+        sent.append("your workflow, agent, step and tool names as they are")
+    if fingerprint:
+        sent.append("one fingerprint (no text) per model call")
+    rest = "pseudonyms of everything else, made" if keep_names else "pseudonyms made"
+    return ("Your prompts, replies and code never leave your machine. "
+            f"We receive {', '.join(sent)}, and {rest} with a key only you hold.")
 PAGE_CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; "
             "img-src data:; font-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 
@@ -194,7 +207,8 @@ class Session:
             self.prices_param = token_prices.as_param(token_prices.keyed(self.prices, Names(Pseudonymizer(key)).model))
         return {"check": prepare_check(manifest, events, len(paths)), "events": manifest["events"],
                 "sessions": manifest["sessions"], "kept_names": manifest["kept_names"],
-                "prices_file": sorted(self.prices) if self.prices else None}
+                "prices_file": sorted(self.prices) if self.prices else None,
+                "sent": what_is_sent(self.dataset.read_bytes()), "trust": trust_line(keep_names, llm_inputs)}
 
     def submit(self, token: str, prices: list[float] | None) -> dict:
         if self.dataset is None:
