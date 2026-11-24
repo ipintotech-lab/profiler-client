@@ -161,6 +161,8 @@ def view(report: dict) -> dict:
                               for r in _list(overview.get("workflows")) if isinstance(r, dict)],
                 "totals": _pick(overview.get("totals"), ("spend", "replaceable", "share", "findings")),
                 **_pick(overview, ("risk_labels",)),
+                # savings held out of the headline because model outputs weren't recorded (a line beside it)
+                "held_unrecorded": _held(overview.get("held_unrecorded")),
                 # the risk tiers' counts and savings (the savings overview and the risk tiles)
                 **({"risk_totals": {risk: _pick(t, ("count", "counted", "saving"))
                                     for risk, t in overview["risk_totals"].items() if isinstance(t, dict)}}
@@ -172,8 +174,13 @@ def view(report: dict) -> dict:
     return _workflow_view(report)
 
 
+def _held(held: Any) -> dict | None:
+    return _pick(held, ("cost", "share", "findings", "text")) or None
+
+
 def _workflow_view(report: dict) -> dict:
     summary = _pick(report.get("summary"), ("totals", "notes", "replaceable", "risk_labels", "highest_risk"))
+    summary["held_unrecorded"] = _held(_pick(report.get("summary"), ("held_unrecorded",)).get("held_unrecorded"))
     risk_totals = _pick(report.get("summary"), ("risk_totals",)).get("risk_totals")
     if isinstance(risk_totals, dict):
         summary["risk_totals"] = {risk: _pick(t, ("count", "counted", "saving"))
