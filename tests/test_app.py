@@ -195,6 +195,41 @@ def test_names_are_pseudonyms_and_the_llm_prompt_is_left_out_by_default(local, t
     assert used == {"keep_names": True, "llm_inputs": True}
 
 
+@pytest.mark.parametrize("keep_names", [False, True])
+@pytest.mark.parametrize("llm_inputs", [False, True])
+def test_the_send_tiles_match_the_seal_and_the_events_file(local, transcript_file, keep_names, llm_inputs):
+    """What the send screen says will be sent, counted again here from the
+    bytes of events.jsonl: the seal line, then one event per line."""
+    request(local, "PUT", f"/api/raw?name={transcript_file.name}", transcript_file.read_bytes())
+    code, _, body = request(local, "POST", "/api/prepare", {"keep_names": keep_names, "llm_inputs": llm_inputs})
+    assert code == 200, body
+    out = json.loads(body)
+    first, *lines = local.session.dataset.read_bytes().splitlines()
+    seal, events = json.loads(first)["profiler_client_seal"], [json.loads(line) for line in lines]
+    assert out["sent"] == {
+        "text_fields": 0,
+        "clear_names": seal["kept_names"],
+        "pseudonyms": len(set(re.findall(rb"h:[0-9a-f]{64}", b"\n".join(lines)))),
+        "events": len(events),
+        "fingerprints": sum(1 for e in events if e["event_type"] == "decision" and "input" in e.get("input_state", {})),
+    }
+    assert bool(out["sent"]["clear_names"]) is keep_names
+    assert bool(out["sent"]["fingerprints"]) is llm_inputs
+    assert out["sent"]["pseudonyms"] > 0 and out["sent"]["events"] == seal["events"] == out["events"]
+    body = b"\n".join(lines).decode()
+    # the transcript's prompt, reply, paths and commands; only the names the seal lists may be in clear text
+    assert not [c for c in CANARIES if c not in seal["kept_names"] and c in body]
+    assert out["trust"] == app.trust_line(keep_names, llm_inputs)
+    assert ("names as they are" in out["trust"]) is keep_names and ("fingerprint" in out["trust"]) is llm_inputs
+    assert "anonym" not in out["trust"].lower()
+
+
+def test_the_page_opens_with_the_default_trust_line_and_a_link_to_what_is_sent():
+    page = (app.files("profiler_client") / "static/app.html").read_text()
+    assert f'<p class="trust" id="trust">{app.trust_line()}</p>' in page
+    assert 'docs/what-is-sent.md" target="_blank" rel="noopener">Exactly what is sent</a>' in page
+
+
 def test_the_report_comes_back_with_real_names(local, openly7, transcript_file, tmp_path):
     run_through(local, transcript_file)
     upload, job = openly7.seen[0], openly7.seen[1]
