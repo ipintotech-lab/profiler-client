@@ -88,7 +88,8 @@ def page(fixture):
 
 
 def _text(slot: dict) -> str:
-    return re.sub(r"<[^>]+>", "", slot["text"])
+    # the figures' words, without the measured/candidate label that follows each money figure
+    return re.sub(r"<[^>]+>", "", re.sub(r' <span class="mkind"[^>]*>\w+</span>', "", slot["text"]))
 
 
 def _money(text: str) -> list[float]:
@@ -107,6 +108,15 @@ def test_the_headline_is_the_sum_of_the_workflow_rows(fixture, page):
     assert sum(r["spend"] for r in o["workflows"]) == pytest.approx(o["totals"]["spend"])
     assert _text(page["svBig"]).startswith("$1.78 of $8.23 could be saved")
     assert "22%" in _text(page["svLead"])
+
+
+def test_the_overview_money_figures_say_measured_or_candidate(page):
+    kinds = lambda k: re.findall(r'(\$[\d.,]+)(?:</b>)? <span class="mkind" data-kind="(\w+)">', page[k]["text"])
+    assert kinds("svBig") == [("$1.78", "candidate"), ("$8.23", "measured")]
+    assert {k for _, k in kinds("svLegend")} == {"candidate"}
+    assert kinds("totals")[0] == ("$8.23", "measured")
+    assert {k for _, k in kinds("risks")} <= {"candidate"}
+    assert not page["moneyKey"]["hidden"] and 'candidate</span> a cost a rule could replace' in page["moneyKey"]["text"]
 
 
 def test_the_headline_is_the_sum_of_the_counted_findings_and_of_the_risk_tiers(fixture, page):

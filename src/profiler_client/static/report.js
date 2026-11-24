@@ -388,11 +388,24 @@ const gapsOf = data => (data.data_quality?.gaps || []).filter(gap => gap.key !==
 const costEstimated = data => (data.data_quality?.gaps || []).some(gap => gap.key === 'cost' && gap.status === 'estimated');
 const ESTIMATED = 'Cost estimated from tokens at your prices; the trace recorded none (see What the report couldn’t see).';
 
-// say so under the headline, where the dollar figures are read
+// say so under the headline, where the dollar figures are read (the sub line is built here, so it is safe HTML)
 function markEstimate(q, estimated) {
   if (!estimated) return;
-  const sub = q('sub').textContent;
-  q('sub').innerHTML = `${sub ? `${esc(sub)} ` : ''}<span class="estimated">${esc(ESTIMATED)}</span>`;
+  const sub = q('sub').innerHTML;
+  q('sub').innerHTML = `${sub ? `${sub} ` : ''}<span class="estimated">${esc(ESTIMATED)}</span>`;
+}
+
+// Each money figure in the header and the risk tiles says in words which kind it is: spend the traces recorded
+// (or, without a recorded cost, worked out from tokens), or a cost a rule could replace. No figure changes.
+const MONEY_KINDS = {
+  measured: 'the cost recorded in your traces',
+  estimated: 'worked out from tokens at your prices, as the traces recorded no cost',
+  candidate: 'a cost a rule could replace, not yet replayed against past calls',
+};
+const kind = k => ` <span class="mkind" data-kind="${k}">${k}</span>`;
+const spendKind = reports => reports.some(costEstimated) ? 'estimated' : 'measured';
+function renderMoneyKey(q, spent) {
+  q('moneyKey').innerHTML = [spent, 'candidate'].map(k => `<span class="mkind" data-kind="${k}">${k}</span> ${esc(MONEY_KINDS[k])}`).join('. ') + '.';
 }
 
 
@@ -505,6 +518,7 @@ const SHEET = HEAD + `
     <p class="head" data-r="head"></p>
     <p class="sub" data-r="sub"></p>
     <p class="why sv-wait" data-r="held" hidden></p>
+    <p class="why mkey" data-r="moneyKey"></p>
   </div>
   <ul class="risks" data-r="risks" hidden aria-label="Findings by risk"></ul>
   <p class="notes" data-r="notes"></p>
@@ -614,10 +628,12 @@ function wireCopy(q) {
 
 // the headline: how much of this workflow's spend went to calls the findings could remove, each call counted once
 function renderLead(q, data) {
-  const r = data.summary?.replaceable, cost = data.summary?.totals?.cost || 0;
+  const r = data.summary?.replaceable, cost = data.summary?.totals?.cost || 0, spent = spendKind([data]);
   q('lead').hidden = !r;
   if (!r) return;
   renderHeld(q('held'), data.summary?.held_unrecorded);
+  renderMoneyKey(q, spent);
+  q('moneyKey').hidden = !cost;
   const what = 'a rule, a script or a cache could replace';
   const found = `from ${plural(r.findings, 'finding')}, each call counted once`;
   if (!cost) {
@@ -625,13 +641,13 @@ function renderLead(q, data) {
     q('sub').textContent = '';
   } else if (!r.cost) {
     q('head').textContent = `The report found no calls in this workflow that ${what}.`;
-    q('sub').textContent = `It cost ${money(cost)} in this dataset.`;
+    q('sub').innerHTML = `It cost ${money(cost)}${kind(spent)} in this dataset.`;
   } else if (r.cost >= 50) {
-    q('head').innerHTML = `<b>${money(r.cost)}</b> of the ${money(cost)} this workflow cost went to calls ${what}.`;
+    q('head').innerHTML = `<b>${money(r.cost)}</b>${kind('candidate')} of the ${money(cost)}${kind(spent)} this workflow cost went to calls ${what}.`;
     q('sub').textContent = `That is ${share(r.cost, cost)} of this workflow’s spend in this dataset, ${found}.`;
   } else {  // a small sum reads as nothing: lead with the share
     q('head').innerHTML = `<b>${share(r.cost, cost)}</b> of this workflow’s spend went to calls ${what}.`;
-    q('sub').textContent = `${money(r.cost)} of ${money(cost)} in this dataset, ${found}.`;
+    q('sub').innerHTML = `${money(r.cost)}${kind('candidate')} of ${money(cost)}${kind(spent)} in this dataset, ${esc(found)}.`;
   }
 }
 
@@ -697,7 +713,7 @@ function renderRisks(q, totals, labels = {}, { found = [], runs = 0, recorded } 
     const head = `<li class="tile" data-risk="${risk}"><h3>${esc(name || labels[risk] || risk)}</h3>` +
       (name && labels[risk] ? `<p class="k">${esc(labels[risk])}</p>` : '');
     if (!t.count) return `${head}<p class="empty">${esc(EMPTY_TILE[risk](runs, recorded))}</p></li>`;
-    const figure = risk === 'high' ? '' : `<p class="fig">${t.saving ? `${money(t.saving)} <span class="k">in this dataset</span>` : 'No saving counted'}</p>`;
+    const figure = risk === 'high' ? '' : `<p class="fig">${t.saving ? `${money(t.saving)}${kind('candidate')} <span class="k">in this dataset</span>` : 'No saving counted'}</p>`;
     const list = risk === 'high' && high.length ? investigateList(high, many) : '';
     return `${head}${figure}<p>${plural(t.count, 'finding')}${inHeadline(t)}</p>${list}<p class="k">${esc(act)}</p></li>`;
   }).join('');
@@ -1272,7 +1288,7 @@ function renderReport(root, data, { name = '', meta = [], showEvent = null, decl
     else pickOnMap(q, new Set(on));
     q('map').scrollIntoView({ block: 'center', behavior: 'smooth' });
   });
-  q('totals').innerHTML = `${money(t.cost)} <span class="k">across</span> ${plural(t.runs, 'run')}<span class="k">,</span> ` +
+  q('totals').innerHTML = `${money(t.cost)}${t.cost ? kind(spendKind([data])) : ''} <span class="k">across</span> ${plural(t.runs, 'run')}<span class="k">,</span> ` +
     `${plural(t.llm_calls, 'LLM call')} <span class="k">and</span> ${plural(t.tool_calls, 'tool call')}<span class="k">,</span> ${count(t.tokens)} tokens.`;
 
   const workflows = data.observe?.workflows || [], wf = workflows.find(w => w.name === data.observe?.selected_workflow);
@@ -1883,6 +1899,7 @@ const OVERVIEW = HEAD + FLOW_TABS + `
     <div class="sv-card">
       <p class="sv-big" data-r="svBig"></p>
       <p class="sv-lead" data-r="svLead"></p>
+      <p class="why mkey" data-r="moneyKey" hidden></p>
       <p class="why estimated" data-r="svEstimate" hidden></p>
       <div class="sv-stack" data-r="svStack" role="img"></div>
       <p class="sv-legend" data-r="svLegend"></p>
@@ -1993,7 +2010,7 @@ const projector = (total, n) => {
 };
 const perRunMoney = v => v >= 0.01 ? money(v) : `$${v.toFixed(4)}`;
 
-function renderSavingsHead(q, m) {
+function renderSavingsHead(q, m, spent) {
   const what = 'a rule, a script or a cache could replace';
   q('svStack').hidden = q('svLegend').hidden = !m.spend || !m.saved;
   if (!m.spend) {
@@ -2001,7 +2018,9 @@ function renderSavingsHead(q, m) {
     q('svLead').textContent = `No cost is recorded in this dataset, so the report can’t say how much of it went to calls ${what}. Give token prices to estimate it.`;
     return;
   }
-  q('svBig').innerHTML = `${money(m.saved)} <small>of ${money(m.spend)} could be saved</small>`;
+  q('svBig').innerHTML = `${money(m.saved)}${kind('candidate')} <small>of ${money(m.spend)}${kind(spent)} could be saved</small>`;
+  renderMoneyKey(q, spent);
+  q('moneyKey').hidden = false;
   if (!m.saved) { q('svLead').textContent = `The report found no calls in this dataset that ${what}.`; return; }
   q('svLead').innerHTML = `<b>${share(m.saved, m.spend)}</b> of what these agents spent went to calls ${what}.`;
   const pct = v => (100 * v / m.spend).toFixed(2) + '%';
@@ -2010,15 +2029,15 @@ function renderSavingsHead(q, m) {
     const { ready, review } = m.tiers;
     q('svStack').innerHTML = `<i class="ready" style="width:${pct(ready)}"></i><i class="review" style="width:${pct(review)}"></i>`;
     q('svStack').setAttribute('aria-label', `Spend: ${money(ready)} ready to save, ${money(review)} to review first, ${money(m.spend - m.saved)} needed`);
-    q('svLegend').innerHTML = `<span><i class="ready"></i><b>${money(ready)}</b> ready to save · low risk</span>` +
-      `<span><i class="review"></i><b>${money(review)}</b> review first</span>${needed}`;
+    q('svLegend').innerHTML = `<span><i class="ready"></i><b>${money(ready)}</b>${kind('candidate')} ready to save · low risk</span>` +
+      `<span><i class="review"></i><b>${money(review)}</b>${kind('candidate')} review first</span>${needed}`;
     q('svInvestigate').hidden = !m.tiers.investigate;
     q('svInvestigate').innerHTML = m.tiers.investigate ? `<span class="pill invest">Investigate</span> Plus ${plural(m.tiers.investigate, 'finding')} to investigate: results that change for the same input. They aren’t priced until the cause is known.` : '';
   } else {  // a result from before risk tiers: one bar for all of it
     q('svInvestigate').hidden = true;
     q('svStack').innerHTML = `<i class="saved" style="width:${pct(m.saved)}"></i>`;
     q('svStack').setAttribute('aria-label', `Spend: ${money(m.saved)} could be saved, ${money(m.spend - m.saved)} needed`);
-    q('svLegend').innerHTML = `<span><i class="saved"></i><b>${money(m.saved)}</b> could be saved</span>${needed}`;
+    q('svLegend').innerHTML = `<span><i class="saved"></i><b>${money(m.saved)}</b>${kind('candidate')} could be saved</span>${needed}`;
   }
 }
 
@@ -2077,14 +2096,14 @@ function renderWaiting(q, m) {
   if (q('svWaiting').hidden) { q('svWaiting').innerHTML = ''; return; }
   const steps = m.waiting.map(w => `${stepName(w.step)}${many ? ` (${stepName(w.wf)})` : ''}`);
   const one = m.waiting.length === 1;
-  q('svWaiting').innerHTML = `<span class="pill review">One answer away</span> <b>Up to ${money(total)} more</b> if ` +
+  q('svWaiting').innerHTML = `<span class="pill review">One answer away</span> <b>Up to ${money(total)}</b>${kind('candidate')} <b>more</b> if ` +
     `${one ? 'this step only reads' : `these ${count(m.waiting.length)} steps only read`}: ${andList(steps)}. ` +
     `${one ? 'It isn’t' : 'They aren’t'} counted above until you declare ${one ? 'it' : 'them'} read-only (Tell us about the agent), then analyze again.`;
 }
 
 function renderSavings(q, data) {
   const m = savingsModel(data);
-  renderSavingsHead(q, m);
+  renderSavingsHead(q, m, spendKind(Object.values(data.reports || {})));
   renderWaiting(q, m);
   renderHeld(q('svHeld'), data.overview?.held_unrecorded);
   const runs = q('svRuns');
@@ -2136,7 +2155,7 @@ function renderOverview(root, data, { name = '', meta = [], showEvent = null, de
     const found = Object.entries(data.reports || {}).flatMap(([wf, r]) => (r?.summary?.findings || []).map(f => ({ wf, f })));
     renderRisks(q, o.risk_totals, o.risk_labels,
       { found, runs, recorded: { unrecorded: reports.filter(inputsUnrecorded).length, workflows: reports.length } });
-    q('totals').innerHTML = `${money(o.totals?.spend)} <span class="k">across</span> ${plural(runs, 'run')} <span class="k">in</span> ${plural((o.workflows || []).length, 'workflow')}.`;
+    q('totals').innerHTML = `${money(o.totals?.spend)}${o.totals?.spend ? kind(spendKind(reports)) : ''} <span class="k">across</span> ${plural(runs, 'run')} <span class="k">in</span> ${plural((o.workflows || []).length, 'workflow')}.`;
     renderOverviewRows(q, o, data.reports);
     const flow = renderFlow(q, data);
     const live = renderLive(q, data, { visible: () => !q('viewLive').hidden });
