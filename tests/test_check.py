@@ -5,7 +5,7 @@ import pytest
 from conftest import CANARIES
 
 from profiler_client.cli import main
-from profiler_client.readiness import GOOD_RUNS, MIN_BYPASS_OBSERVATIONS, SMALL_DATASET_EVENTS
+from profiler_client.readiness import GOOD_RUNS, MIN_BYPASS_OBSERVATIONS, SMALL_DATASET_EVENTS, summarize_findings
 
 
 def _log(tmp_path, runs=25, cost=True, tool_input=True, name="events.json"):
@@ -174,3 +174,19 @@ def test_duplicate_work_between_agents_needs_tool_arguments_agent_names_and_runs
     _, out = _check(capsys, _log(tmp_path, runs=5, tool_input=False, name="thin.json"))
     row = next(f for f in out["findings_possible"] if f["key"] == "between_agents")
     assert row["status"] == "no" and row["reason"] == "needs tool arguments, 10 or more runs"
+
+
+def _column(*statuses_and_reasons):
+    return [[{"key": "k", "label": "L", "status": s, "reason": r}] for s, r in statuses_and_reasons]
+
+
+@pytest.mark.parametrize("workflows, status, reason", [
+    (_column(("yes", "a")), "yes", "a"),
+    (_column(("yes", "a"), ("yes", "b")), "yes", "in both workflows"),
+    (_column(("yes", "a"), ("yes", "b"), ("yes", "c")), "yes", "in all 3 workflows"),
+    (_column(("no", "no parent links recorded"), ("no", "no parent links recorded")), "no", "no parent links recorded"),
+    (_column(("yes", "a"), ("no", "x"), ("limited", "x"), ("no", "y")), "limited", "in 1 of 4 workflows; the others: x"),
+])
+def test_the_dataset_line_says_each_thing_once(workflows, status, reason):
+    [row] = summarize_findings(workflows)
+    assert (row["status"], row["reason"]) == (status, reason)
