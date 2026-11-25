@@ -58,7 +58,7 @@ def trust_line(keep_names: bool = False, fingerprint: bool = False) -> str:
     if fingerprint:
         sent.append("one fingerprint (no text) per model call")
     rest = "pseudonyms of everything else, made" if keep_names else "pseudonyms made"
-    return ("Your prompts, replies and code never leave your machine. "
+    return ("Your prompts, replies and code are not sent to us. "
             f"We receive {', '.join(sent)}, and {rest} with a key only you hold.")
 PAGE_CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; "
             "img-src data:; font-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")

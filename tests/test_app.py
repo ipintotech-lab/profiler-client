@@ -224,6 +224,16 @@ def test_the_send_tiles_match_the_seal_and_the_events_file(local, transcript_fil
     assert "anonym" not in out["trust"].lower()
 
 
+@pytest.mark.parametrize("keep_names", [False, True])
+@pytest.mark.parametrize("fingerprint", [False, True])
+def test_the_trust_line_says_not_sent_to_us_and_not_never_leave_the_machine(keep_names, fingerprint):
+    # the agent itself sends prompts to the model provider, so "never leave your machine" would be untrue;
+    # wording agreed with the lawyer on 25 Nov 2026
+    line = app.trust_line(keep_names, fingerprint)
+    assert line.startswith("Your prompts, replies and code are not sent to us. ")
+    assert "never leave" not in line and "anonym" not in line.lower()
+
+
 def test_the_page_opens_with_the_default_trust_line_and_a_link_to_what_is_sent():
     page = (app.files("profiler_client") / "static/app.html").read_text()
     assert f'<p class="trust" id="trust">{app.trust_line()}</p>' in page
