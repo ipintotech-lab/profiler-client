@@ -106,7 +106,7 @@ def request(server, method, path, body=None, *, cookie=True, host=None, origin=T
     host = host or f"127.0.0.1:{server.server_port}"
     headers = {"Host": host}
     if cookie:
-        headers["Cookie"] = f"{app.COOKIE}={server.token}"
+        headers["Cookie"] = f"{server.cookie}={server.token}"
     if origin and method != "GET":
         headers["Origin"] = f"http://{host}"
     if isinstance(body, dict):
@@ -142,7 +142,7 @@ def test_the_start_address_swaps_its_token_for_a_strict_cookie(local):
     code, headers, _ = request(local, "GET", f"/?t={local.token}", cookie=False)
     assert code == 303 and headers["Location"] == "/"
     cookie = headers["Set-Cookie"]
-    assert cookie.startswith(f"{app.COOKIE}={local.token};")
+    assert cookie.startswith(f"{local.cookie}={local.token};")
     assert "HttpOnly" in cookie and "SameSite=Strict" in cookie
     assert request(local, "GET", "/?t=wrong", cookie=False)[0] == 403
 
@@ -154,6 +154,61 @@ def test_nothing_is_served_without_the_session_cookie(local, path):
     assert code == 200 and b"Include a fingerprint of what the model read (no text is sent)" in page
     assert headers["X-Frame-Options"] == "DENY" and "frame-ancestors 'none'" in headers["Content-Security-Policy"]
     assert headers["Cache-Control"] == "no-store"
+
+
+class Browser:
+    """Keeps cookies as a browser does: by host and name, whatever the port."""
+
+    def __init__(self):
+        self.jar = {}
+
+    def request(self, server, method, path, body=None):
+        origin = f"http://127.0.0.1:{server.server_port}"
+        headers = {"Cookie": "; ".join(f"{k}={v}" for k, v in self.jar.items()), "Origin": origin}
+        req = urllib.request.Request(origin + path, data=None if body is None else json.dumps(body).encode(),
+                                     method=method, headers=headers)
+        try:
+            with urllib.request.build_opener(NoRedirect).open(req, timeout=30) as res:
+                code, got, text = res.status, res.headers, res.read()
+        except urllib.error.HTTPError as exc:
+            code, got, text = exc.code, exc.headers, exc.read()
+        for cookie in got.get_all("Set-Cookie") or []:
+            name, value = cookie.split(";")[0].split("=", 1)
+            self.jar[name] = value
+        return code, text
+
+    def open(self, server):
+        assert self.request(server, "GET", f"/?t={server.token}")[0] == 303
+
+
+@pytest.fixture
+def second(local, tmp_path):
+    work = tmp_path / "work2"
+    work.mkdir(mode=0o700)
+    server = app.AppServer(0, app.Session(work, local.session.origin))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield server
+    server.shutdown()
+    server.server_close()
+
+
+def test_two_apps_open_in_one_browser_do_not_sign_each_other_out(local, second):
+    browser = Browser()
+    for server in (local, second):
+        browser.open(server)
+    for server in (local, second, local):  # opened first, opened last, and back to the first
+        assert browser.request(server, "GET", "/")[0] == 200
+        code, text = browser.request(server, "POST", "/api/submit", {"token": CLIENT_TOKEN})
+        assert (code, json.loads(text)) == (400, {"error": "prepare the files first"})  # past the gate
+
+
+def test_one_apps_cookie_does_not_open_another_app(local, second):
+    browser = Browser()
+    browser.open(local)
+    assert browser.request(second, "GET", "/")[0] == 403
+    # nor does its value under the other app's cookie name
+    browser.jar = {second.cookie: local.token}
+    assert browser.request(second, "GET", "/")[0] == 403
 
 
 def test_another_host_name_is_refused_even_with_the_cookie(local):
@@ -168,7 +223,7 @@ def test_changes_need_this_page_as_their_origin(local, transcript_file):
                            host=f"127.0.0.1:{local.server_port}", origin=False)
     assert status == 403
     req_headers = {"Host": f"127.0.0.1:{local.server_port}", "Origin": "http://evil.example",
-                   "Cookie": f"{app.COOKIE}={local.token}", "Content-Type": "application/json"}
+                   "Cookie": f"{local.cookie}={local.token}", "Content-Type": "application/json"}
     req = urllib.request.Request(f"http://127.0.0.1:{local.server_port}/api/prepare", data=b"{}", method="POST",
                                  headers=req_headers)
     with pytest.raises(urllib.error.HTTPError) as refused:

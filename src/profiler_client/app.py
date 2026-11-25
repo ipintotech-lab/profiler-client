@@ -39,6 +39,7 @@ from .names import Names
 from .pseudonym import Pseudonymizer, new_key
 from .report import render_html
 
+# each app's cookie is named for its port (AppServer.cookie): browsers share cookies between the ports of one host
 COOKIE = "pc_session"
 MAX_RAW_BYTES = 2 * 1024**3  # all trace files of one dataset, as copied to the temporary folder
 MAX_JSON_BYTES = 64 * 1024
@@ -256,6 +257,11 @@ class AppServer(ThreadingHTTPServer):
     def url(self) -> str:
         return f"http://127.0.0.1:{self.server_port}/?t={self.token}"
 
+    @property
+    def cookie(self) -> str:
+        """This app's own cookie name, so a second app open in the same browser doesn't replace its cookie."""
+        return f"{COOKIE}_{self.server_port}"
+
 
 class Handler(BaseHTTPRequestHandler):
     server: AppServer
@@ -289,7 +295,7 @@ class Handler(BaseHTTPRequestHandler):
             cookie.load(self.headers.get("Cookie", ""))
         except Exception:  # noqa: BLE001 -- a malformed cookie header is just no cookie
             return False
-        sent = cookie.get(COOKIE)
+        sent = cookie.get(self.server.cookie)
         return sent is not None and hmac.compare_digest(sent.value.encode(), self.server.token.encode())
 
     def _route(self) -> None:
@@ -300,7 +306,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.headers.get("Host", "") in self.server.hosts \
                     and hmac.compare_digest(query["t"][0].encode(), self.server.token.encode()):
                 return self._send(303, headers={"Location": "/", "Set-Cookie":
-                                                f"{COOKIE}={self.server.token}; HttpOnly; SameSite=Strict; Path=/"})
+                                                f"{self.server.cookie}={self.server.token}; HttpOnly; SameSite=Strict; Path=/"})
             return self._send(403, b"this address is not this app's; use the one profiler-client app printed")
         if not self._allowed():
             self.close_connection = True
