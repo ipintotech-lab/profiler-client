@@ -350,9 +350,15 @@ def summarize_findings(per_workflow: list[list[dict]]) -> list[dict]:
         allowed = sum(1 for s in statuses if s == "yes")
         status = "yes" if allowed == len(statuses) else "no" if all(s == "no" for s in statuses) else "limited"
         reasons = Counter(f["reason"] for f in column if f["status"] != "yes")
-        reason = column[0]["reason"] if len(column) == 1 else (
-            f"yes in all {len(column)} workflows" if status == "yes"
-            else f"yes in {allowed} of {len(column)} workflows; {reasons.most_common(1)[0][0]}")
+        n = len(column)
+        if n == 1:
+            reason = column[0]["reason"]
+        elif status == "yes":
+            reason = "in both workflows" if n == 2 else f"in all {n} workflows"
+        elif status == "no":
+            reason = reasons.most_common(1)[0][0]
+        else:
+            reason = f"in {allowed} of {n} workflows; the others: {reasons.most_common(1)[0][0]}"
         rows.append({"key": column[0]["key"], "label": column[0]["label"], "status": status, "reason": reason})
     return rows
 
