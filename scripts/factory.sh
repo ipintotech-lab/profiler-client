@@ -10,7 +10,9 @@
 #       The agent reviews the PR by "Code Review Rules" in AGENTS.md. Then
 #       you decide whether to post the review as a PR comment.
 #
-# Needs: gh (signed in), git, jq, and `claude` or `codex` (signed in).
+# A review installs and runs the PR's code on this machine: only PRs by
+# collaborators are accepted.
+# Needs: bash, gh (signed in), git, jq, and `claude` or `codex` (signed in).
 set -euo pipefail
 
 # this repo's set-up, as in .github/workflows/test.yml
@@ -38,6 +40,13 @@ command -v "$agent" >/dev/null || die "$agent is not installed"
 root=$(git rev-parse --show-toplevel)
 repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 out=$(mktemp -d)
+cleanup=()  # run on a failed exit: what this run made, so it can run again
+on_exit() {
+  local rc=$? c
+  if [[ $rc != 0 ]]; then for c in ${cleanup[@]+"${cleanup[@]}"}; do eval "$c" || true; done; fi
+  rm -rf "$out"
+}
+trap on_exit EXIT
 
 # Only text written by people with write access reaches the agent.
 check_author() {
@@ -50,11 +59,13 @@ run_agent() {
   local dir=$1 prompt=$2 ro=$3
   echo "factory: $agent is working in $dir (this can take a while)"
   if [[ $agent == claude ]]; then
-    local deny=()
-    [[ $ro == 1 ]] && deny=(--disallowedTools "Edit,Write,NotebookEdit")
-    (cd "$dir" && claude -p "$prompt" --permission-mode auto "${deny[@]}") > "$out/last.md"
+    # the owner pushes, posts and commits, never the agent
+    local deny="Bash(git push:*),Bash(git commit:*),Bash(gh:*),Bash(railway:*)"
+    [[ $ro == 1 ]] && deny+=",Edit,Write,NotebookEdit"
+    (cd "$dir" && claude -p "$prompt" --permission-mode auto --disallowedTools "$deny") > "$out/last.md"
   elif [[ $ro == 1 ]]; then
-    (cd "$dir" && codex exec review --base origin/main -o "$out/last.md" "$prompt")
+    # --base takes no prompt: Codex reads "Code Review Rules" in AGENTS.md itself
+    (cd "$dir" && codex exec review --base origin/main -o "$out/last.md")
   else
     codex exec -C "$dir" -s workspace-write -o "$out/last.md" "$prompt"
   fi
@@ -69,10 +80,13 @@ build() {
   check_author "$author"
   branch="factory/$num-$agent"
   wt="$(dirname "$root")/$(basename "$root")-factory-$num-$agent"
-  [[ -e $wt ]] && die "$wt exists: finish or remove it first (git worktree remove $wt)"
+  [[ -e $wt ]] && die "$wt exists: finish or remove it first (git worktree remove $wt && git branch -D $branch)"
+  git -C "$root" rev-parse -q --verify "refs/heads/$branch" >/dev/null \
+    && die "branch $branch exists: delete it first (git branch -D $branch)"
 
   git -C "$root" fetch -q origin main
   git -C "$root" worktree add -q -b "$branch" "$wt" origin/main
+  cleanup=("git -C '$root' worktree remove --force '$wt'" "git -C '$root' branch -q -D '$branch'")
   echo "factory: setting up $wt"
   (cd "$wt" && setup_venv)
 
@@ -95,6 +109,7 @@ with 'Closes #$num'. Write nothing else in that message." 0
     echo "factory: no changes. Worktree: $wt"; return
   fi
   ask "Commit, push $branch and open the PR?" || { echo "factory: left as is in $wt"; return; }
+  cleanup=()  # from here on, keep the work even if a step fails
   git -C "$wt" add -A
   git -C "$wt" commit -q -m "$title (#$num)" -m "$coauthor"
   git -C "$wt" push -q -u origin "$branch"
@@ -110,12 +125,18 @@ review() {
   [[ $(jq -r .state <<<"$pr") == OPEN ]] || die "PR #$num is not open"
   [[ $(jq -r .isCrossRepository <<<"$pr") == false ]] || die "PR #$num comes from a fork"
   author=$(jq -r .author.login <<<"$pr")
-  [[ $author == app/* ]] || check_author "$author"
+  check_author "$author"
   wt="$(dirname "$root")/$(basename "$root")-review-$num"
   [[ -e $wt ]] && die "$wt exists: remove it first (git worktree remove --force $wt)"
 
   git -C "$root" fetch -q origin main "+refs/pull/$num/head:refs/remotes/origin/pr/$num"
   git -C "$root" worktree add -q --detach "$wt" "origin/pr/$num"
+  cleanup=("git -C '$root' worktree remove --force '$wt'")
+  # review by main's rules and agent settings, not the PR's own (as the GitHub action does)
+  git -C "$wt" checkout -q origin/main -- AGENTS.md CLAUDE.md
+  if git -C "$wt" cat-file -e origin/main:.claude 2>/dev/null; then
+    rm -rf "$wt/.claude"; git -C "$wt" checkout -q origin/main -- .claude
+  else rm -rf "$wt/.claude"; fi
   echo "factory: setting up $wt"
   (cd "$wt" && setup_venv)
 
