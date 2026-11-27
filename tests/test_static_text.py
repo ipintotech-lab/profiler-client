@@ -19,6 +19,8 @@ def test_there_are_static_files():
 
 @pytest.mark.parametrize("path", FILES, ids=lambda p: p.name)
 def test_no_character_the_html_parser_rewrites(path):
-    data = path.read_bytes()
+    # a Windows checkout (core.autocrlf) turns LF into CRLF: that is the checkout, not the source, and the
+    # server reads the files as text, which turns CRLF back into LF. A lone CR or any other control byte is ours.
+    data = path.read_bytes().replace(b"\r\n", b"\n")
     bad = sorted({b for b in data if b < 0x20 and b not in (0x09, 0x0A)})
     assert not bad, f"{path.name} holds control bytes {[hex(b) for b in bad]}: write them as escapes"
