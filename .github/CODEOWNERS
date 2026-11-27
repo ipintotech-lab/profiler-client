@@ -1,0 +1,23 @@
+# Sensitive paths: a human owner reviews every change here. This takes effect
+# only once branch protection turns on "Require review from Code Owners".
+
+# workflows (incl. release tagging), agent rules, the factory script
+/.github/                              @ipintotech-lab @TomerDanielGH
+/AGENTS.md                             @ipintotech-lab @TomerDanielGH
+/CLAUDE.md                             @ipintotech-lab @TomerDanielGH
+/scripts/factory.sh                    @ipintotech-lab @TomerDanielGH
+/pyproject.toml                        @ipintotech-lab @TomerDanielGH
+
+# the event format and the seal
+/src/profiler_client/contract.py       @ipintotech-lab @TomerDanielGH
+/src/profiler_client/dataset.py        @ipintotech-lab @TomerDanielGH
+
+# what leaves the machine: pseudonyms, keys, names, the privacy policy
+/src/profiler_client/pseudonym.py      @ipintotech-lab @TomerDanielGH
+/src/profiler_client/keyfile.py        @ipintotech-lab @TomerDanielGH
+/src/profiler_client/names.py          @ipintotech-lab @TomerDanielGH
+/src/profiler_client/policy.py         @ipintotech-lab @TomerDanielGH
+/docs/what-is-sent.md                  @ipintotech-lab @TomerDanielGH
+
+# sending and sign-in
+/src/profiler_client/app.py            @ipintotech-lab @TomerDanielGH

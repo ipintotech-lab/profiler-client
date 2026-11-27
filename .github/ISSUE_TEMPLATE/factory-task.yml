@@ -1,0 +1,52 @@
+name: Factory task
+description: A task for a coding agent (Claude Code or Codex). Rules in AGENTS.md.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Nothing starts on its own. When the issue is ready, either add the `factory` label (Claude builds it on GitHub) or run `scripts/factory.sh build <issue> claude|codex` on your machine.
+        Issues from people without write access are not built: copy the request into an issue of your own.
+        A change to the event format needs the owner's OK before this issue gets the label.
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What should change, and why.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Each one testable. The PR must show a test for each.
+    validations:
+      required: true
+  - type: dropdown
+    id: repos
+    attributes:
+      label: Which repo(s)
+      options:
+        - server (agents_profiler)
+        - client (profiler-client)
+        - both (client first, then a server pin)
+    validations:
+      required: true
+  - type: dropdown
+    id: sensitive
+    attributes:
+      label: Sensitive area?
+      description: What is sent or kept, pseudonyms and keys, sending and sign-in, the event format, workflows, release tagging.
+      options: ["no", "yes"]
+    validations:
+      required: true
+  - type: dropdown
+    id: contract
+    attributes:
+      label: Changes the API, the report or the event format?
+      options: ["no", "yes"]
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
