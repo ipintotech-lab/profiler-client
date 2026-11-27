@@ -1974,7 +1974,7 @@ function savingsModel(data) {
       // the saving what one answer adds. A high-risk one needs its cause found first, so it isn't offered here
       if (!f.counted && f.held_out === 'declaration' && f.covered_by == null && f.risk !== 'high' &&
           !(f.nodes || []).some(n => countedSteps.has(n))) {
-        const step = (f.nodes || [])[0] ?? f.title, key = `${wf} ${step}`;
+        const step = (f.nodes || [])[0] ?? f.title, key = `${wf}\x00${step}`;
         if (!waiting.has(key)) waiting.set(key, { wf, step, saving: 0 });
         waiting.get(key).saving += f.saving;
         continue;
