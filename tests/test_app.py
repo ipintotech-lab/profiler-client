@@ -293,6 +293,8 @@ def test_the_page_opens_with_the_default_trust_line_and_a_link_to_what_is_sent()
     page = (app.files("profiler_client") / "static/app.html").read_text()
     assert f'<p class="trust" id="trust">{app.trust_line()}</p>' in page
     assert 'docs/what-is-sent.md" target="_blank" rel="noopener">Exactly what is sent</a>' in page
+    # the repos moved from ipintotech-lab to the openly7 org
+    assert "github.com/ipintotech-lab/" not in page
 
 
 def test_the_report_comes_back_with_real_names(local, openly7, transcript_file, tmp_path):
