@@ -40,10 +40,14 @@ command -v "$agent" >/dev/null || die "$agent is not installed"
 root=$(git rev-parse --show-toplevel)
 repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 out=$(mktemp -d)
-cleanup=()  # run on a failed exit: what this run made, so it can run again
+# removed on a failed exit: what this run made, so it can run again
+cleanup_wt="" cleanup_branch=""
 on_exit() {
-  local rc=$? c
-  if [[ $rc != 0 ]]; then for c in ${cleanup[@]+"${cleanup[@]}"}; do eval "$c" || true; done; fi
+  local rc=$?
+  if [[ $rc != 0 ]]; then
+    if [[ -n $cleanup_wt ]]; then git -C "$root" worktree remove --force "$cleanup_wt" || true; fi
+    if [[ -n $cleanup_branch ]]; then git -C "$root" branch -q -D "$cleanup_branch" || true; fi
+  fi
   rm -rf "$out"
 }
 trap on_exit EXIT
@@ -86,7 +90,7 @@ build() {
 
   git -C "$root" fetch -q origin main
   git -C "$root" worktree add -q -b "$branch" "$wt" origin/main
-  cleanup=("git -C '$root' worktree remove --force '$wt'" "git -C '$root' branch -q -D '$branch'")
+  cleanup_wt=$wt cleanup_branch=$branch
   echo "factory: setting up $wt"
   (cd "$wt" && setup_venv)
 
@@ -109,7 +113,7 @@ with 'Closes #$num'. Write nothing else in that message." 0
     echo "factory: no changes. Worktree: $wt"; return
   fi
   ask "Commit, push $branch and open the PR?" || { echo "factory: left as is in $wt"; return; }
-  cleanup=()  # from here on, keep the work even if a step fails
+  cleanup_wt="" cleanup_branch=""  # from here on, keep the work even if a step fails
   git -C "$wt" add -A
   git -C "$wt" commit -q -m "$title (#$num)" -m "$coauthor"
   git -C "$wt" push -q -u origin "$branch"
@@ -131,7 +135,7 @@ review() {
 
   git -C "$root" fetch -q origin main "+refs/pull/$num/head:refs/remotes/origin/pr/$num"
   git -C "$root" worktree add -q --detach "$wt" "origin/pr/$num"
-  cleanup=("git -C '$root' worktree remove --force '$wt'")
+  cleanup_wt=$wt
   # review by main's rules and agent settings, not the PR's own (as the GitHub action does)
   git -C "$wt" checkout -q origin/main -- AGENTS.md CLAUDE.md
   if git -C "$wt" cat-file -e origin/main:.claude 2>/dev/null; then
