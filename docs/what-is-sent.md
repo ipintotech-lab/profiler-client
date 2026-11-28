@@ -48,7 +48,7 @@ your names on this machine.
 
 It never sends:
 
-- the trace files you choose (they are copied into a temporary folder on this machine and deleted when the app exits; an interrupted app, for example one killed, or on Windows ended by a sign-out or shutdown, can leave the folder behind, and deleting it at the next start is planned, [#58](https://github.com/ipintotech-lab/profiler-client/issues/58));
+- the trace files you choose (they are copied into a temporary folder on this machine and deleted when the app exits; an interrupted app, for example one killed, or on Windows ended by a sign-out or shutdown, can leave the folder behind, and deleting it at the next start is planned, [#58](https://github.com/openly7/profiler-client/issues/58));
 - `manifest.json`;
 - the name list;
 - the event references.
@@ -72,7 +72,7 @@ event references, that is your user profile folder, which by default you, the
 machine's administrators and Windows itself can read. The report page gets the
 access of the folder you write it to, which may be a shared folder. Protecting
 these files on Windows as the key is protected is planned
-([#56](https://github.com/ipintotech-lab/profiler-client/issues/56)).
+([#56](https://github.com/openly7/profiler-client/issues/56)).
 
 `--no-name-list` skips the name list and the event references.
 `profiler-client forget` deletes them.

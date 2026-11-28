@@ -14,7 +14,7 @@ Python 3.10 or later; the only dependency is pydantic. Install a release from
 GitHub and check the version:
 
 ```
-pip install https://github.com/ipintotech-lab/profiler-client/archive/refs/tags/v0.41.4.tar.gz
+pip install https://github.com/openly7/profiler-client/archive/refs/tags/v0.41.4.tar.gz
 profiler-client --version
 ```
 
@@ -216,7 +216,7 @@ you work.
 ## Development
 
 ```
-git clone https://github.com/ipintotech-lab/profiler-client.git
+git clone https://github.com/openly7/profiler-client.git
 cd profiler-client
 pip install -e '.[dev]'
 pytest

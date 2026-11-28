@@ -57,7 +57,7 @@ logs. Never put server code, secrets, real traces or personal data in them.
 
 ### Cross-repo contract
 
-The server (`ipintotech-lab/agents_profiler`, private) pins a tagged commit of
+The server (`openly7/agents_profiler`, private) pins a tagged commit of
 this client and serves its report renderer.
 
 - A report change lands here first; the owner tags it; then a server PR pins
