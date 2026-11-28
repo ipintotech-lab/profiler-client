@@ -46,9 +46,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # keep the job's token out of .git/config while the PR's install runs;
-          # claude-code-action sets up its own git credentials
-          persist-credentials: false
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
